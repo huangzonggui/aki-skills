@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+import shutil
 
 
 def read_text(path: Path) -> str:
@@ -85,16 +86,27 @@ def main() -> int:
 
     ensure_parent(output_path)
 
-    cmd = [
-        "npx",
-        "-y",
-        "bun",
-        str(gemini_script),
-        "--promptfiles",
-        str(prompt_out),
-        "--image",
-        str(output_path),
-    ]
+    bun_path = os.environ.get("BUN_PATH") or shutil.which("bun")
+    if bun_path:
+        cmd = [
+            bun_path,
+            str(gemini_script),
+            "--promptfiles",
+            str(prompt_out),
+            "--image",
+            str(output_path),
+        ]
+    else:
+        cmd = [
+            "npx",
+            "-y",
+            "bun",
+            str(gemini_script),
+            "--promptfiles",
+            str(prompt_out),
+            "--image",
+            str(output_path),
+        ]
     if args.session_id:
         cmd += ["--sessionId", args.session_id]
     if args.model:
