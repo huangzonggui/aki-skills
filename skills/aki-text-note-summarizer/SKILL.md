@@ -199,6 +199,9 @@ This is process guidance, not a style rule:
 - If the article is a list (e.g., Top N), include every item.
 - Each bullet should include at least one concrete detail (number, name, time, place, or specific claim).
 - For long articles, aim for a denser list (8–12 bullets) and a longer 感悟 (at least 3 sentences).
+- 概览用 2–3 句完成可信度+当下价值+方向感，不要一句带过。
+- 干货列表每条用 1–2 句，包含结论+影响/代价/趋势走向。
+- 感悟里至少有 1 个“意外点/反常识”，保持真话语气但不编造。
 
 ## 去AI味处理
 
