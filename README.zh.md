@@ -100,7 +100,7 @@ npx add-skill jimliu/baoyu-skills
 /baoyu-xhs-images 今日星座运势
 ```
 
-**风格**（视觉美学）：`cute`（默认）、`fresh`、`tech`、`warm`、`bold`、`minimal`、`retro`、`pop`、`notion`
+**风格**（视觉美学）：`cute`（默认）、`fresh`、`tech`、`warm`、`bold`、`minimal`、`retro`、`pop`、`notion`、`handnote`（手绘笔记）、`masterpiece`（杰作手绘信息图）
 
 **布局**（信息密度）：
 | 布局 | 密度 | 适用场景 |

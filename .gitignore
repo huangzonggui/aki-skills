@@ -140,3 +140,4 @@ vite.config.ts.timestamp-*
 tests-data/
 
 .DS_Store
+skills/.system/
