@@ -63,7 +63,7 @@ Style × Layout can be freely combined. Example: `--style notion --layout dense`
 | `handnote` | Concise hand-drawn notes, logical and clean |
 | `masterpiece` | Warm, inspirational hand-drawn infographic with 3D lettering |
 
-Detailed style definitions: `references/styles/<style>.md` (shared styles live in `../baoyu-style-library/references/styles/`)
+Detailed style definitions: `references/styles/<style>.md` (shared styles live in `../aki-style-library/references/styles/`)
 
 ## Layout Gallery
 

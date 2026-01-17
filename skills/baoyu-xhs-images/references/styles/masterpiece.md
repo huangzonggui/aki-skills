@@ -2,7 +2,7 @@
 
 Warm, inspirational hand-drawn infographic with 3D lettering
 
-Source of truth: `skills/baoyu-style-library/references/styles/masterpiece.md`
+Source of truth: `skills/aki-style-library/references/styles/masterpiece.md`
 
 ## Color Palette
 

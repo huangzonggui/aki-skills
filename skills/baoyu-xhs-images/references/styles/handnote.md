@@ -2,7 +2,7 @@
 
 Minimal hand-drawn note, logical and clean
 
-Source of truth: `skills/baoyu-style-library/references/styles/handnote.md`
+Source of truth: `skills/aki-style-library/references/styles/handnote.md`
 
 ## Color Palette
 

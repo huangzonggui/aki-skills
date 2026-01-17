@@ -1,5 +1,5 @@
 ---
-name: baoyu-style-library
+name: aki-style-library
 description: Shared prompt library for reusable visual styles. Use when asked to reuse or reference handnote/masterpiece prompts across skills.
 ---
 
@@ -21,6 +21,6 @@ Centralized style prompt library for reuse across multiple skills.
 
 Reference these files from other skills when you need consistent styling:
 
-- `../baoyu-style-library/references/styles/<style>.md`
+- `../aki-style-library/references/styles/<style>.md`
 
 This skill does not generate images by itself; it provides reusable prompt templates.
