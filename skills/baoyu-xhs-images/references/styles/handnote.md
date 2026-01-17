@@ -2,6 +2,8 @@
 
 Minimal hand-drawn note, logical and clean
 
+Source of truth: `skills/baoyu-style-library/references/styles/handnote.md`
+
 ## Color Palette
 
 - Primary: Black (#1A1A1A)

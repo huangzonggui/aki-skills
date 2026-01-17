@@ -42,7 +42,7 @@ Break down complex content into eye-catching infographic series for Xiaohongshu 
 
 | Dimension | Controls | Options |
 |-----------|----------|---------|
-| **Style** | Visual aesthetics: colors, lines, decorations | cute, fresh, tech, warm, bold, minimal, retro, pop, notion |
+| **Style** | Visual aesthetics: colors, lines, decorations | cute, fresh, tech, warm, bold, minimal, retro, pop, notion, handnote, masterpiece |
 | **Layout** | Information structure: density, arrangement | sparse, balanced, dense, list, comparison, flow |
 
 Style × Layout can be freely combined. Example: `--style notion --layout dense` creates an intellectual-looking knowledge card with high information density.
@@ -60,8 +60,10 @@ Style × Layout can be freely combined. Example: `--style notion --layout dense`
 | `retro` | Vintage, nostalgic, trendy |
 | `pop` | Vibrant, energetic, eye-catching |
 | `notion` | Minimalist hand-drawn line art, intellectual |
+| `handnote` | Concise hand-drawn notes, logical and clean |
+| `masterpiece` | Warm, inspirational hand-drawn infographic with 3D lettering |
 
-Detailed style definitions: `references/styles/<style>.md`
+Detailed style definitions: `references/styles/<style>.md` (shared styles live in `../baoyu-style-library/references/styles/`)
 
 ## Layout Gallery
 
@@ -91,6 +93,8 @@ When no `--style` is specified, analyze content to select:
 | Classic, vintage, old, traditional | `retro` |
 | Fun, exciting, wow, amazing | `pop` |
 | Knowledge, concept, productivity, SaaS, notion | `notion` |
+| Logic, structure, summary, diagram | `handnote` |
+| Motivational, storytelling, inspirational | `masterpiece` |
 
 ## Auto Layout Selection
 
@@ -311,6 +315,8 @@ Outline: outline.md
 | retro | ✓✓ | ✓✓ | ✓ | ✓✓ | ✓ | ✓ |
 | pop | ✓✓ | ✓✓ | ✓ | ✓✓ | ✓✓ | ✓ |
 | notion | ✓✓ | ✓✓ | ✓✓ | ✓✓ | ✓✓ | ✓✓ |
+| handnote | ✓✓ | ✓✓ | ✓ | ✓ | ✓ | ✓✓ |
+| masterpiece | ✓ | ✓✓ | ✓✓ | ✓ | ✓ | ✓ |
 
 ✓✓ = highly recommended, ✓ = works well
 

@@ -112,6 +112,13 @@ npx add-skill jimliu/baoyu-skills
 | `comparison` | 双栏 | 对比、优劣 |
 | `flow` | 3-6 步 | 流程、时间线 |
 
+### baoyu-style-library
+
+跨技能复用的风格提示词库。
+
+- 风格：`handnote`、`masterpiece`
+- 文件：`skills/baoyu-style-library/references/styles/<style>.md`
+
 ### baoyu-cover-image
 
 为文章生成手绘风格封面图，支持多种风格选项。

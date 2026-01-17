@@ -2,6 +2,8 @@
 
 Warm, inspirational hand-drawn infographic with 3D lettering
 
+Source of truth: `skills/baoyu-style-library/references/styles/masterpiece.md`
+
 ## Color Palette
 
 - Primary: Warm cream (#FFFAF0), vanilla (#F7E9C6), parchment (#F3E2C7)

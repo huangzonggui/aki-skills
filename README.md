@@ -112,6 +112,13 @@ Xiaohongshu (RedNote) infographic series generator. Breaks down content into 1-1
 | `comparison` | 2 sides | Before/after, pros/cons |
 | `flow` | 3-6 steps | Processes, timelines |
 
+### baoyu-style-library
+
+Shared style prompt library for reuse across skills.
+
+- Styles: `handnote`, `masterpiece`
+- Files: `skills/baoyu-style-library/references/styles/<style>.md`
+
 ### baoyu-cover-image
 
 Generate hand-drawn style cover images for articles with multiple style options.
