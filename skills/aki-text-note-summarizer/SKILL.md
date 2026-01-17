@@ -197,6 +197,11 @@ Use three sections with headings:
 
 Avoid AI-ish tone, template openings, and filler. Add ~30% personal judgement without fabricating facts.
 
+## 去AI味处理
+
+After drafting the note, always apply the `aki-deai-writing` skill to the draft to reduce AI-ish tone before saving.
+If the user explicitly says to skip 去AI味处理, skip this step.
+
 ## File saving rules
 
 Save the note in the same directory as the source article.
@@ -214,5 +219,6 @@ If the target file already exists, append `-v2`, `-v3`, etc.
 1. Read the style guide.
 2. Read the article.
 3. Draft the note using the required tone and sections.
-4. Save the note next to the article.
-5. Reply with the saved path and the note content.
+4. Run `aki-deai-writing` on the draft (unless user says to skip).
+5. Save the note next to the article.
+6. Reply with the saved path and the note content.
