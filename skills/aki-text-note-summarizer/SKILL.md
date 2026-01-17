@@ -187,15 +187,9 @@ Next Step for You:
 【用户输入】
 ```
 
-## Output format
+## Writing constraint
 
-Use three sections with headings:
-
-1. 概览（<= 60字）
-2. 干货列表（不工整的要点列表）
-3. 感悟（强主观判断）
-
-Avoid AI-ish tone, template openings, and filler. Add ~30% personal judgement without fabricating facts.
+The style guide above is the full writing prompt. Do not add or omit any writing rules beyond it. Use its section titles and requirements exactly as written.
 
 ## 去AI味处理
 
