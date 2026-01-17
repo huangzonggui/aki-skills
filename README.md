@@ -119,6 +119,14 @@ Shared style prompt library for reuse across skills.
 - Styles: `handnote`, `masterpiece`
 - Files: `skills/aki-style-library/references/styles/<style>.md`
 
+### aki-handnote-cover
+
+Generate a single high-density handnote-style cover image from a full article without summarizing.
+
+```bash
+python skills/aki-handnote-cover/scripts/generate_handnote_cover.py --article path/to/article.md
+```
+
 ### baoyu-cover-image
 
 Generate hand-drawn style cover images for articles with multiple style options.

@@ -119,6 +119,14 @@ npx add-skill jimliu/baoyu-skills
 - 风格：`handnote`、`masterpiece`
 - 文件：`skills/aki-style-library/references/styles/<style>.md`
 
+### aki-handnote-cover
+
+从全文生成单张高密度手绘笔记风格封面，不做摘要或删减。
+
+```bash
+python skills/aki-handnote-cover/scripts/generate_handnote_cover.py --article path/to/article.md
+```
+
 ### baoyu-cover-image
 
 为文章生成手绘风格封面图，支持多种风格选项。
