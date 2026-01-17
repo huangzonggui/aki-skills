@@ -191,6 +191,15 @@ Next Step for You:
 
 The style guide above is the full writing prompt. Do not add or omit any writing rules beyond it. Use its section titles and requirements exactly as written.
 
+## Coverage & length policy
+
+This is process guidance, not a style rule:
+
+- Match length to article density: cover all major points; do not over-compress.
+- If the article is a list (e.g., Top N), include every item.
+- Each bullet should include at least one concrete detail (number, name, time, place, or specific claim).
+- For long articles, aim for a denser list (8–12 bullets) and a longer 感悟 (at least 3 sentences).
+
 ## 去AI味处理
 
 After drafting the note, always apply the `aki-deai-writing` skill to the draft to reduce AI-ish tone before saving.
