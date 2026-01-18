@@ -45,6 +45,10 @@ Env overrides:
 - `COMFLY_API_BASE_URL`
 - `COMFLY_IMAGE_MODEL`
 
+Optional local secrets (not committed):
+- Create `skills/comfly-image-gen/.env` and put `COMFLY_API_KEY=...`
+- The script will auto-load this file at runtime.
+
 ## Usage
 
 Dry-run (no paid call):

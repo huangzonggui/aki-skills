@@ -68,6 +68,20 @@ def env_or(value: str, env_key: str) -> str:
     return env_val or value
 
 
+def load_dotenv(dotenv_path: Path) -> None:
+    if not dotenv_path.exists():
+        return
+    for raw in dotenv_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def slugify(text: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9]+", "-", text.strip().lower()).strip("-")
     return cleaned or "image"
@@ -315,6 +329,9 @@ def main() -> None:
         help="Do not download URLs; only record them in metadata",
     )
     args = parser.parse_args()
+
+    dotenv_path = Path(__file__).resolve().parent / ".env"
+    load_dotenv(dotenv_path)
 
     root = Path(__file__).resolve().parents[1]
     config_path = Path(args.config).expanduser().resolve() if args.config else root / "workflow.config.json"
