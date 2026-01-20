@@ -10,8 +10,8 @@ Convert article/text to styled HTML with AI-powered smart formatting and export 
 ## Quick Start
 
 ```bash
-# Set your API key (GLM by default)
-export CLOUD_CODE_API_KEY="your-api-key-here"
+# ONE-TIME SETUP: Create your API key config
+echo "API_KEY=your-api-key-here" > ~/.cloud-code-api-key
 
 # Generate HTML from markdown
 npx -y bun ${SKILL_DIR}/scripts/generate-html.ts input.md
@@ -19,6 +19,11 @@ npx -y bun ${SKILL_DIR}/scripts/generate-html.ts input.md
 # With custom output path
 npx -y bun ${SKILL_DIR}/scripts/generate-html.ts input.md --output ./output/article.html
 ```
+
+**Auto-Detection**: The skill automatically detects:
+- `~/.cloud-code-api-key` (your API config file)
+- `ANTHROPIC_BASE_URL` and `ANTHROPIC_MODEL` from your IDE environment
+- Falls back to environment variables if needed
 
 > **Note**: `${SKILL_DIR}` represents this skill's installation directory. Agent replaces with actual path at runtime.
 
