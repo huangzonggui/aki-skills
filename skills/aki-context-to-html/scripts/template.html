@@ -10,11 +10,17 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Serif+SC:wght@400;600;700;900&display=swap" rel="stylesheet">
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* Pure white background - as per requirements */
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #ffffff;
             min-height: 100vh;
-            padding: 20px;
         }
 
         /* Control Panel - Dark frosted glass */
@@ -22,11 +28,11 @@
             position: fixed;
             top: 20px;
             left: 20px;
-            width: 320px;
-            background: rgba(15, 23, 42, 0.85);
+            width: 300px;
+            background: rgba(15, 23, 42, 0.9);
             backdrop-filter: blur(20px);
             border-radius: 16px;
-            padding: 24px;
+            padding: 20px;
             color: white;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
             z-index: 100;
@@ -35,15 +41,15 @@
         }
 
         .control-panel h3 {
-            font-size: 18px;
+            font-size: 16px;
             font-weight: 600;
-            margin-bottom: 16px;
+            margin-bottom: 14px;
             color: #f1f5f9;
         }
 
         .control-panel label {
             display: block;
-            font-size: 13px;
+            font-size: 12px;
             color: #94a3b8;
             margin-bottom: 6px;
         }
@@ -53,7 +59,7 @@
             background: rgba(51, 65, 85, 0.8);
             border-radius: 10px;
             padding: 4px;
-            margin-bottom: 16px;
+            margin-bottom: 14px;
         }
 
         .segmented-control button {
@@ -61,7 +67,7 @@
             background: transparent;
             border: none;
             color: #94a3b8;
-            padding: 10px;
+            padding: 8px;
             border-radius: 8px;
             font-size: 13px;
             font-weight: 500;
@@ -76,14 +82,14 @@
 
         .btn {
             width: 100%;
-            padding: 14px;
+            padding: 12px;
             border: none;
             border-radius: 12px;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
         }
 
         .btn-primary {
@@ -116,49 +122,49 @@
             display: flex;
             justify-content: center;
             padding: 20px;
-            margin-left: 360px;
+            margin-left: 340px;
         }
 
+        /* Article card - FIXED WIDTH at 600px */
         .article-card {
-            width: {{TARGET_WIDTH}}px;
-            min-height: 400px;
-            background: white;
-            border-radius: 20px;
+            width: 600px;
+            background: #ffffff;
+            border-radius: 0;
             overflow: hidden;
             box-shadow: 0 50px 100px -20px rgba(0, 0, 0, 0.5);
         }
 
         .content-area {
-            padding: 60px 80px;
-            background: white;
+            padding: 50px 60px;
+            background: #ffffff;
         }
 
-        /* Typography */
+        /* Typography - using Noto Serif SC for titles */
         .article-title {
             font-family: 'Noto Serif SC', serif;
-            font-size: 48px;
+            font-size: 36px;
             font-weight: 900;
-            line-height: 1.3;
-            margin-bottom: 40px;
+            line-height: 1.4;
+            margin-bottom: 32px;
             color: #1a1a1a;
         }
 
         .section-title {
             font-family: 'Noto Serif SC', serif;
-            font-size: 28px;
+            font-size: 22px;
             font-weight: 700;
             color: #1a1a1a;
-            margin-top: 50px;
-            margin-bottom: 25px;
-            padding-left: 20px;
-            border-left: 5px solid #ef4444;
+            margin-top: 40px;
+            margin-bottom: 20px;
+            padding-left: 16px;
+            border-left: 4px solid #ef4444;
         }
 
         p {
-            font-size: 18px;
+            font-size: 16px;
             line-height: 1.8;
             color: #333;
-            margin-bottom: 20px;
+            margin-bottom: 16px;
             text-align: justify;
         }
 
@@ -168,72 +174,73 @@
             color: #1a1a1a;
         }
 
+        /* em with red color + bold */
         em {
             color: #ef4444;
             font-weight: 600;
         }
 
-        /* Highlight marks */
+        /* mark with yellow background + orange underline */
         mark {
-            background: linear-gradient(180deg, transparent 50%, #fbbf24 100%);
-            padding: 0 4px;
+            background: linear-gradient(180deg, transparent 60%, #fbbf24 60%);
+            padding: 0 3px;
             font-weight: 600;
+            border-bottom: 2px solid #f97316;
         }
 
         .highlight-pink {
-            background: linear-gradient(180deg, transparent 50%, #f472b6 100%);
-            padding: 0 4px;
+            background: linear-gradient(180deg, transparent 60%, #f472b6 60%);
+            padding: 0 3px;
             font-weight: 600;
         }
 
         .highlight-green {
-            background: linear-gradient(180deg, transparent 50%, #86efac 100%);
-            padding: 0 4px;
+            background: linear-gradient(180deg, transparent 60%, #86efac 60%);
+            padding: 0 3px;
             font-weight: 600;
         }
 
         .highlight-blue {
-            background: linear-gradient(180deg, transparent 50%, #60a5fa 100%);
-            padding: 0 4px;
+            background: linear-gradient(180deg, transparent 60%, #60a5fa 60%);
+            padding: 0 3px;
             font-weight: 600;
         }
 
         /* Lists */
         ul, ol {
-            margin: 20px 0;
-            padding-left: 30px;
+            margin: 16px 0;
+            padding-left: 24px;
         }
 
         li {
-            font-size: 18px;
+            font-size: 16px;
             line-height: 1.8;
             color: #333;
-            margin-bottom: 12px;
+            margin-bottom: 10px;
             text-align: justify;
         }
 
         ul li::marker {
             color: #667eea;
-            font-size: 18px;
         }
 
         /* Blockquote */
         blockquote {
-            border-left: 4px solid #667eea;
-            padding-left: 20px;
-            margin: 24px 0;
+            border-left: 3px solid #667eea;
+            padding-left: 16px;
+            margin: 20px 0;
             color: #64748b;
             font-style: italic;
-            font-size: 17px;
+            font-size: 15px;
         }
 
         /* Code */
         code {
             font-family: 'JetBrains Mono', monospace;
             background: #f1f5f9;
-            padding: 3px 8px;
-            border-radius: 6px;
-            font-size: 15px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 14px;
             color: #e11d48;
         }
 
@@ -241,7 +248,7 @@
         hr {
             border: none;
             border-top: 2px dashed #e2e8f0;
-            margin: 40px 0;
+            margin: 32px 0;
         }
 
         /* Progress toast */
@@ -252,9 +259,9 @@
             transform: translateX(-50%);
             background: rgba(0, 0, 0, 0.9);
             color: white;
-            padding: 16px 32px;
+            padding: 14px 28px;
             border-radius: 50px;
-            font-size: 15px;
+            font-size: 14px;
             font-weight: 500;
             z-index: 1000;
             display: none;
@@ -279,17 +286,17 @@
 
         /* Stats */
         .stats {
-            margin-top: 16px;
-            padding-top: 16px;
+            margin-top: 14px;
+            padding-top: 14px;
             border-top: 1px solid rgba(148, 163, 184, 0.2);
-            font-size: 12px;
+            font-size: 11px;
             color: #64748b;
         }
 
         .stats-row {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 6px;
+            margin-bottom: 5px;
         }
 
         .stats-label {
@@ -301,10 +308,22 @@
             font-weight: 500;
         }
 
-        /* Hide during export */
-        .exporting .control-panel,
-        .exporting .progress-toast {
-            display: none !important;
+        /* Page number on exported images */
+        .page-number {
+            text-align: center;
+            color: #999;
+            font-size: 14px;
+            padding-top: 20px;
+            font-family: 'Noto Serif SC', serif;
+        }
+
+        /* Hidden staging div for measuring heights */
+        #staging {
+            position: absolute;
+            top: -9999px;
+            left: -9999px;
+            width: 600px;
+            visibility: hidden;
         }
     </style>
 </head>
@@ -334,13 +353,19 @@
             </div>
             <div class="stats-row">
                 <span class="stats-label">输出尺寸:</span>
-                <span class="stats-value" id="outputSize">-</span>
+                <span class="stats-value" id="outputSize">600 × 800</span>
             </div>
         </div>
     </div>
 
     <!-- Progress Toast -->
     <div class="progress-toast" id="progressToast">正在生成图片...</div>
+
+    <!-- Staging div for block-level measurement -->
+    <div id="staging">
+        <div id="stagingContent" style="width: 600px; padding: 50px 60px; background: #ffffff;">
+        </div>
+    </div>
 
     <!-- Preview Container -->
     <div class="preview-container">
@@ -353,16 +378,16 @@
     </div>
 
     <script>
-        // Configuration
+        // Configuration - 600px width as per requirements
         const CONFIG = {
-            targetWidth: {{TARGET_WIDTH}},
+            targetWidth: 600,
             ratio: '{{RATIO}}',
             scale: 2  // For retina displays
         };
 
         // DOM Elements
         const contentArea = document.getElementById('contentArea');
-        const articleCard = document.getElementById('articleCard');
+        const stagingContent = document.getElementById('stagingContent');
         const exportBtn = document.getElementById('exportBtn');
         const downloadHtmlBtn = document.getElementById('downloadHtmlBtn');
         const progressToast = document.getElementById('progressToast');
@@ -374,18 +399,24 @@
         let currentRatio = CONFIG.ratio;
 
         // Calculate target height based on ratio
+        // 3:4 = 800px, 3:5 = 1000px at 600px width
         function getTargetHeight(ratio) {
             if (ratio === '3:5') {
-                return Math.round(CONFIG.targetWidth * (5 / 3));
+                return 1000;
             }
-            return Math.round(CONFIG.targetWidth * (4 / 3));
+            return 800;
         }
 
-        // Update stats
+        // Update stats using block-level counting
         function updateStats() {
             const targetHeight = getTargetHeight(currentRatio);
-            const totalHeight = contentArea.offsetHeight;
-            const sliceCount = Math.ceil(totalHeight / targetHeight);
+
+            // Copy content to staging div to measure
+            stagingContent.innerHTML = contentArea.innerHTML;
+
+            // Calculate chunks by block-level elements
+            const chunks = calculateChunks(stagingContent, targetHeight);
+            const sliceCount = chunks.length;
 
             sliceCountEl.textContent = `${sliceCount} 张`;
             outputSizeEl.textContent = `${CONFIG.targetWidth} × ${targetHeight}`;
@@ -403,11 +434,42 @@
             }
         }
 
-        function hideToast() {
-            progressToast.classList.remove('show');
+        // BLOCK-LEVEL slicing algorithm
+        // Splits content by HTML elements, not by pixels
+        function calculateChunks(container, targetHeight) {
+            const elements = Array.from(container.children);
+            const chunks = [];
+            let currentChunk = [];
+            let currentHeight = 0;
+            const padding = 50 * 2;  // Top + bottom padding
+
+            for (const el of elements) {
+                const elHeight = el.offsetHeight;
+
+                // If adding this element exceeds target height
+                if (currentHeight + elHeight > targetHeight - padding) {
+                    // Start a new chunk
+                    if (currentChunk.length > 0) {
+                        chunks.push(currentChunk);
+                    }
+                    currentChunk = [el];
+                    currentHeight = elHeight;
+                } else {
+                    // Add to current chunk
+                    currentChunk.push(el);
+                    currentHeight += elHeight;
+                }
+            }
+
+            // Don't forget the last chunk
+            if (currentChunk.length > 0) {
+                chunks.push(currentChunk);
+            }
+
+            return chunks;
         }
 
-        // FIXED: Export slices with proper canvas dimensions
+        // Export slices using block-level splitting
         async function exportSlices() {
             const targetHeight = getTargetHeight(currentRatio);
 
@@ -418,77 +480,59 @@
                 // Wait for fonts to be ready
                 await document.fonts.ready;
 
-                // Create canvas with EXPLICIT dimensions
-                const canvas = document.createElement('canvas');
-                canvas.width = CONFIG.targetWidth * CONFIG.scale;
-                canvas.height = contentArea.offsetHeight * CONFIG.scale;
-                const ctx = canvas.getContext('2d');
+                // Calculate chunks using block-level algorithm
+                const chunks = calculateChunks(contentArea, targetHeight);
+                const totalSlices = chunks.length;
 
-                if (!ctx) {
-                    throw new Error('Failed to get canvas context');
-                }
+                showToast(`正在生成: 0/${totalSlices}`);
 
-                // Scale context for retina
-                ctx.scale(CONFIG.scale, CONFIG.scale);
+                // Create a container for rendering each chunk
+                const renderContainer = document.createElement('div');
+                renderContainer.style.cssText = `
+                    position: absolute;
+                    top: -9999px;
+                    left: -9999px;
+                    width: ${CONFIG.targetWidth}px;
+                `;
+                document.body.appendChild(renderContainer);
 
-                // Render HTML to canvas with EXPLICIT width
-                const htmlCanvas = await html2canvas(contentArea, {
-                    width: CONFIG.targetWidth,
-                    height: contentArea.offsetHeight,
-                    scale: 1,  // Don't use html2canvas scale, use our own
-                    useCORS: true,
-                    backgroundColor: '#ffffff',
-                    logging: false,
-                    onclone: (clonedDoc) => {
-                        const clonedContent = clonedDoc.getElementById('contentArea');
-                        if (clonedContent) {
-                            clonedContent.style.width = `${CONFIG.targetWidth}px`;
-                        }
+                // Export each chunk
+                for (let i = 0; i < chunks.length; i++) {
+                    const chunk = chunks[i];
+
+                    // Create a wrapper for this chunk
+                    const wrapper = document.createElement('div');
+                    wrapper.style.cssText = `
+                        width: ${CONFIG.targetWidth}px;
+                        min-height: ${targetHeight}px;
+                        background: #ffffff;
+                        padding: 50px 60px;
+                    `;
+
+                    // Clone and append elements
+                    for (const el of chunk) {
+                        wrapper.appendChild(el.cloneNode(true));
                     }
-                });
-
-                // Draw to our scaled canvas
-                ctx.drawImage(htmlCanvas, 0, 0, CONFIG.targetWidth, htmlCanvas.height);
-
-                const totalHeight = canvas.height / CONFIG.scale;
-                const sliceHeight = targetHeight;
-                const totalSlices = Math.ceil(totalHeight / sliceHeight);
-
-                showToast(`正在切片: 0/${totalSlices}`);
-
-                // Export each slice
-                for (let i = 0; i < totalSlices; i++) {
-                    const startY = i * sliceHeight * CONFIG.scale;
-                    const remainingHeight = Math.min(sliceHeight * CONFIG.scale, canvas.height - startY);
-
-                    // Create slice canvas with EXACT output dimensions
-                    const sliceCanvas = document.createElement('canvas');
-                    sliceCanvas.width = CONFIG.targetWidth * CONFIG.scale;
-                    sliceCanvas.height = remainingHeight;
-                    const sliceCtx = sliceCanvas.getContext('2d');
-
-                    if (!sliceCtx) continue;
-
-                    // Copy from source canvas
-                    sliceCtx.drawImage(
-                        canvas,
-                        0, startY, canvas.width, remainingHeight,
-                        0, 0, sliceCanvas.width, sliceCanvas.height
-                    );
 
                     // Add page number
-                    const fontSize = Math.round(24 * CONFIG.scale);
-                    sliceCtx.font = `bold ${fontSize}px Noto Serif SC, serif`;
-                    sliceCtx.fillStyle = '#999';
-                    sliceCtx.textAlign = 'center';
-                    sliceCtx.fillText(
-                        `${i + 1}/${totalSlices}`,
-                        sliceCanvas.width / 2,
-                        remainingHeight - 30 * CONFIG.scale
-                    );
+                    const pageNum = document.createElement('div');
+                    pageNum.className = 'page-number';
+                    pageNum.textContent = `${i + 1}/${totalSlices}`;
+                    wrapper.appendChild(pageNum);
+
+                    renderContainer.appendChild(wrapper);
+
+                    // Render to canvas
+                    const canvas = await html2canvas(wrapper, {
+                        width: CONFIG.targetWidth,
+                        scale: CONFIG.scale,
+                        useCORS: true,
+                        backgroundColor: '#ffffff',
+                        logging: false
+                    });
 
                     // Download
-                    sliceCanvas.toBlob((blob) => {
+                    canvas.toBlob((blob) => {
                         if (blob) {
                             const url = URL.createObjectURL(blob);
                             const a = document.createElement('a');
@@ -499,11 +543,17 @@
                         }
                     }, 'image/png');
 
-                    showToast(`正在切片: ${i + 1}/${totalSlices}`);
+                    // Clean up
+                    renderContainer.removeChild(wrapper);
 
-                    // Throttle
-                    await new Promise(resolve => setTimeout(resolve, 150));
+                    showToast(`正在生成: ${i + 1}/${totalSlices}`);
+
+                    // Throttle to prevent browser blocking
+                    await new Promise(resolve => setTimeout(resolve, 200));
                 }
+
+                // Clean up
+                document.body.removeChild(renderContainer);
 
                 showToast(`✅ 完成! 已下载 ${totalSlices} 张图片`, 3000);
 

@@ -176,16 +176,19 @@ async function generateHtml(
   const template = fs.readFileSync(templatePath, 'utf-8');
 
   // Replace placeholders
+  // Default width is 600px as per requirements
+  const width = options.width ?? 600;
+  const ratio = options.ratio ?? '3:4';
+
   let html = template
     .replace('{{TITLE}}', escapeHtml(title))
     .replace('{{CONTENT}}', htmlBody)
-    .replace('{{RATIO}}', options.ratio ?? '3:4')
-    .replace('{{TARGET_WIDTH}}', String(options.width ?? 1080));
+    .replace('{{RATIO}}', ratio)
+    .replace('{{TARGET_WIDTH}}', String(width));
 
-  // Calculate target height based on ratio
-  const width = options.width ?? 1080;
-  const ratio = options.ratio ?? '3:4';
-  const targetHeight = ratio === '3:5' ? Math.round(width * (5/3)) : Math.round(width * (4/3));
+  // Note: TARGET_HEIGHT is no longer used in template (hardcoded as 800/1000)
+  // But we keep it for backwards compatibility
+  const targetHeight = ratio === '3:5' ? 1000 : 800;
   html = html.replace('{{TARGET_HEIGHT}}', String(targetHeight));
 
   return html;
@@ -201,14 +204,18 @@ Usage:
 Options:
   --output <path>    Output HTML path (default: <input-dir>/article.html)
   --ratio <ratio>    Aspect ratio: 3:4 or 3:5 (default: 3:4)
-  --width <px>       Target width in pixels (default: 1080)
+  --width <px>       Target width in pixels (default: 600)
   --title <text>     Override article title
   -h, --help         Show this help
 
 Examples:
   npx -y bun generate-html.ts article.md
   npx -y bun generate-html.ts article.md --output ./output.html
-  npx -y bun generate-html.ts article.md --ratio 3:5 --width 1200
+  npx -y bun generate-html.ts article.md --ratio 3:5 --width 800
+
+Note: Default width is 600px for optimal readability. Output sizes:
+  - 3:4 ratio: 600 × 800px
+  - 3:5 ratio: 600 × 1000px
 `);
   process.exit(0);
 }
