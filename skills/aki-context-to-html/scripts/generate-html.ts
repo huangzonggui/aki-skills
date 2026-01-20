@@ -11,11 +11,60 @@ interface Options {
   ratio?: '3:4' | '3:5';
   width?: number;
   title?: string;
+  apiUrl?: string;
+  apiKey?: string;
+  model?: string;
 }
 
 interface ParsedContent {
   title: string;
   content: string;
+}
+
+// Get API configuration
+function getApiConfig(options?: Options): { apiUrl: string; apiKey: string; model: string } {
+  // Try options first
+  if (options?.apiUrl && options?.apiKey) {
+    return {
+      apiUrl: options.apiUrl,
+      apiKey: options.apiKey,
+      model: options.model || 'glm-4-flash',
+    };
+  }
+
+  // Try environment variables (Cloud Code / GLM compatible)
+  const apiKey = process.env.CLOUD_CODE_API_KEY
+    || process.env.GLM_API_KEY
+    || process.env.OPENAI_API_KEY
+    || process.env.API_KEY
+    || '';
+
+  const apiUrl = process.env.CLOUD_CODE_API_URL
+    || process.env.GLM_API_URL
+    || process.env.OPENAI_API_URL
+    || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+
+  const model = process.env.CLOUD_CODE_MODEL
+    || process.env.GLM_MODEL
+    || process.env.MODEL
+    || 'glm-4-flash';
+
+  if (!apiKey) {
+    throw new Error(`
+API Key not found!
+
+Please set one of:
+  - CLOUD_CODE_API_KEY environment variable
+  - GLM_API_KEY environment variable
+  - OPENAI_API_KEY environment variable
+  - API_KEY environment variable
+  - --api-key and --api-url command line options
+
+Get your GLM API key at: https://open.bigmodel.cn/
+`);
+  }
+
+  return { apiUrl, apiKey, model };
 }
 
 function parseMarkdown(filePath: string): ParsedContent {
@@ -60,137 +109,98 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
-// Smart highlighting rules based on content analysis
-function applySmartHighlights(text: string): string {
-  // Rule 1: Key phrases that indicate core insights
-  const coreInsightPatterns = [
-    /根本性的变化[:：](.+?)([。？！])/g,
-    /本质上[:：](.+?)([。？！])/g,
-    /核心是[:：](.+?)([。？！])/g,
-    /最重要的是[:：](.+?)([。？！])/g,
-  ];
+// Call LLM API (GLM/OpenAI compatible) to generate styled HTML
+async function generateStyledHtmlWithLLM(articleText: string, config: { apiUrl: string; apiKey: string; model: string }): Promise<string> {
+  const prompt = `You are an expert content editor and visual designer specializing in Chinese content.
 
-  for (const pattern of coreInsightPatterns) {
-    text = text.replace(pattern, (match, content, punct) => {
-      return `<mark>${content}</mark>${punct}`;
+Your task is to take the provided article and wrap it in semantic HTML for a high-impact, modern layout.
+
+### CORE PRINCIPLES:
+1. **NO DARK BACKGROUNDS**: Do not use dark colors as backgrounds. Use light backgrounds (#ffffff, #f8fafc) only.
+
+2. **VISUAL HIERARCHY**:
+   - Use <h1> for the absolute primary title/hook.
+   - Use <h2> for major arguments or section leads with red left border.
+   - Use <h3> for supporting sub-points.
+   - Headers should be LARGE and act as primary anchors.
+
+3. **WORD-FOR-WORD**: DO NOT CHANGE A SINGLE WORD of the original content.
+
+4. **STYLING ELEMENTS**:
+   - Use <mark> for key quotes or "gold nuggets" (most important insights).
+   - Use <em> for keywords highlighted in RED (product names, important concepts).
+   - Use <strong> for important phrases needing bold.
+   - Use <blockquote> for summary conclusions with blue left border.
+
+5. **STRUCTURE**:
+   - Group related paragraphs under <h3> subheaders.
+   - Use <hr> to separate major sections.
+   - Ensure clear visual flow.
+
+6. **CLEAN FINISH**: No trailing punctuation in headers unless in source.
+
+### OUTPUT:
+Return ONLY the HTML content. No markdown, no <html> or <body> tags, no code blocks.
+
+Example structure:
+<h1>Main Title</h1>
+<p>Introduction with <mark>key insight</mark> and <em>keyword</em>.</p>
+<h2>Section Title</h2>
+<h3>Subsection</h3>
+<p>Content...</p>
+<blockquote>Key conclusion</blockquote>
+
+CONTENT:
+${articleText}`;
+
+  try {
+    const response = await fetch(config.apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        temperature: 0.6,
+        top_p: 0.95,
+        max_tokens: 8000,
+      }),
     });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`API request failed: ${response.status} ${errorText}`);
+    }
+
+    const data = await response.json();
+    const result = data.choices?.[0]?.message?.content || data.content || '';
+
+    // Clean up the response
+    let cleaned = result
+      .replace(/^```html\n?/gm, '')
+      .replace(/^```\n?/gm, '')
+      .replace(/^`.*\n?/gm, '')
+      .trim();
+
+    // Remove any wrapper tags
+    cleaned = cleaned
+      .replace(/<\/?html[^>]*>/gi, '')
+      .replace(/<\/?body[^>]*>/gi, '')
+      .replace(/<\/?head[^>]*>.*?<\/head>/gis, '')
+      .trim();
+
+    return cleaned;
+  } catch (error) {
+    console.error('LLM API Error:', error);
+    throw new Error(`Failed to generate styled HTML: ${error instanceof Error ? error.message : String(error)}`);
   }
-
-  // Rule 2: Numbers/statements with strong emphasis (10倍, "重要", "核心" etc)
-  text = text.replace(/(\d+倍|最快|最强|最重要|核心|关键)/g, '<em>$1</em>');
-
-  // Rule 3: Product names (飞书录音豆, 录音豆, WhisperFlow, Typeless)
-  text = text.replace(/(飞书录音豆|录音豆|WhisperFlow|Typeless|iPhone|MacBook)/g, '<span class="highlight-pink">$1</span>');
-
-  // Rule 4: Benefits/outcomes (锻炼、提升、培养)
-  text = text.replace(/(锻炼|提升|培养|增强|改善)(.+?)([、。])/g, '<span class="highlight-green">$1$2</span>$3');
-
-  // Rule 5: Action items (从现在开始, 建议)
-  text = text.replace(/(从现在开始|我的建议是|建议|应该)(.+?)([。？！])/g, '<span class="highlight-blue">$1$2</span>$3');
-
-  return text;
-}
-
-function convertMarkdownToHtml(markdown: string): string {
-  const lines = markdown.split('\n');
-  const blocks: string[] = [];
-  let inList = false;
-  let listItems: string[] = [];
-  let listType: 'ul' | 'ol' = 'ul';
-
-  const flushList = () => {
-    if (listItems.length > 0) {
-      const tag = listType === 'ol' ? 'ol' : 'ul';
-      blocks.push(`<${tag}>${listItems.map((item) => `<li>${item}</li>`).join('')}</${tag}>`);
-      listItems = [];
-      inList = false;
-    }
-  };
-
-  const processInline = (text: string): string => {
-    // First, apply smart highlighting
-    text = applySmartHighlights(text);
-
-    // Bold (preserve existing)
-    text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-
-    // Highlight/Mark (for manual highlighting)
-    text = text.replace(/==(.+?)==/g, '<mark>$1</mark>');
-
-    // Italic (preserve existing, but convert to em for red color)
-    text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-    // Links
-    text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
-
-    // Inline code
-    text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-    return text;
-  };
-
-  for (const line of lines) {
-    // Empty line
-    if (line.trim() === '') {
-      flushList();
-      continue;
-    }
-
-    // Heading (H2-H6 become h2, H1 is skipped as it's the title)
-    const headingMatch = line.match(/^(#{2,6})\s+(.+)$/);
-    if (headingMatch) {
-      flushList();
-      const headingText = processInline(headingMatch[2]!);
-      blocks.push(`<h2>${headingText}</h2>`);
-      continue;
-    }
-
-    // Blockquote
-    if (line.startsWith('> ')) {
-      flushList();
-      blocks.push(`<blockquote>${processInline(line.slice(2))}</blockquote>`);
-      continue;
-    }
-
-    // Unordered list
-    const ulMatch = line.match(/^[-*]\s+(.+)$/);
-    if (ulMatch) {
-      if (!inList || listType !== 'ul') {
-        flushList();
-        inList = true;
-        listType = 'ul';
-      }
-      listItems.push(processInline(ulMatch[1]!));
-      continue;
-    }
-
-    // Ordered list
-    const olMatch = line.match(/^\d+\.\s+(.+)$/);
-    if (olMatch) {
-      if (!inList || listType !== 'ol') {
-        flushList();
-        inList = true;
-        listType = 'ol';
-      }
-      listItems.push(processInline(olMatch[1]!));
-      continue;
-    }
-
-    // Horizontal rule
-    if (/^[-*_]{3,}\s*$/.test(line)) {
-      flushList();
-      blocks.push('<hr>');
-      continue;
-    }
-
-    // Regular paragraph
-    flushList();
-    blocks.push(`<p>${processInline(line)}</p>`);
-  }
-
-  flushList();
-
-  return blocks.join('\n');
 }
 
 async function generateHtml(
@@ -200,8 +210,13 @@ async function generateHtml(
   // Parse input
   const parsed = parseMarkdown(inputPath);
 
-  // Convert markdown to HTML with smart highlights
-  const htmlBody = convertMarkdownToHtml(parsed.content);
+  // Get API config
+  const apiConfig = getApiConfig(options);
+
+  console.error(`🤖 Calling ${apiConfig.model} for intelligent styling...`);
+
+  // Generate styled HTML with LLM
+  const styledHtml = await generateStyledHtmlWithLLM(parsed.content, apiConfig);
 
   // Override title if provided
   const title = options.title ?? parsed.title;
@@ -213,28 +228,25 @@ async function generateHtml(
   // Replace placeholders - use global replace for TITLE
   const titleMarker = '___TITLE_PLACEHOLDER___';
   let html = template.replaceAll('{{TITLE}}', titleMarker);
-
-  // Now replace with actual title (after HTML encoding)
   html = html.replaceAll(titleMarker, escapeHtml(title));
 
-  // Replace other placeholders
+  // Replace content and other placeholders
   const width = options.width ?? 600;
   const ratio = options.ratio ?? '3:4';
 
-  html = html.replace('{{CONTENT}}', htmlBody);
-  html = html.replace('{{RATIO}}', ratio);
-  html = html.replace('{{TARGET_WIDTH}}', String(width));
+  html = html.replaceAll('{{CONTENT}}', styledHtml);
+  html = html.replaceAll('{{RATIO}}', ratio);
+  html = html.replaceAll('{{TARGET_WIDTH}}', String(width));
 
-  // Note: TARGET_HEIGHT is no longer used in template (hardcoded as 800/1000)
   const targetHeight = ratio === '3:5' ? 1000 : 800;
-  html = html.replace('{{TARGET_HEIGHT}}', String(targetHeight));
+  html = html.replaceAll('{{TARGET_HEIGHT}}', String(targetHeight));
 
   return html;
 }
 
 function printUsage(): never {
   console.log(`
-Aki Context to HTML - Generate styled HTML with smart highlights
+Aki Context to HTML - Generate styled HTML with AI (GLM/OpenAI compatible)
 
 Usage:
   npx -y bun generate-html.ts <input.md> [options]
@@ -244,23 +256,31 @@ Options:
   --ratio <ratio>    Aspect ratio: 3:4 or 3:5 (default: 3:4)
   --width <px>       Target width in pixels (default: 600)
   --title <text>     Override article title
+  --api-url <url>   API URL (default: GLM API)
+  --api-key <key>   API key (or use CLOUD_CODE_API_KEY env var)
+  --model <name>    Model name (default: glm-4-flash)
   -h, --help         Show this help
+
+Environment Variables:
+  CLOUD_CODE_API_KEY    API key (supports GLM, OpenAI compatible)
+  CLOUD_CODE_API_URL    API URL (default: GLM API)
+  CLOUD_CODE_MODEL      Model name (default: glm-4-flash)
+
+  Alternative variables:
+  GLM_API_KEY, OPENAI_API_KEY, API_KEY
+  GLM_API_URL, OPENAI_API_URL
 
 Examples:
   npx -y bun generate-html.ts article.md
   npx -y bun generate-html.ts article.md --output ./output.html
-  npx -y bun generate-html.ts article.md --ratio 3:5 --width 800
+  npx -y bun generate-html.ts article.md --ratio 3:5
 
-Note: Default width is 600px for optimal readability. Output sizes:
+Note: This skill uses LLM (GLM by default) to intelligently analyze content
+and apply semantic HTML formatting with smart highlights.
+
+Output sizes:
   - 3:4 ratio: 600 × 800px
   - 3:5 ratio: 600 × 1000px
-
-Smart Highlighting:
-  - Yellow (mark): Core insights, "本质上", "根本性的变化"
-  - Red (em): Emphasized words, numbers, "最重要", "核心"
-  - Pink: Product names, tools, brands
-  - Green: Benefits, outcomes (锻炼, 提升, 培养)
-  - Blue: Action items, suggestions
 `);
   process.exit(0);
 }
@@ -289,6 +309,12 @@ async function main(): Promise<void> {
       options.width = parseInt(args[++i]!, 10);
     } else if (arg === '--title' && args[i + 1]) {
       options.title = args[++i];
+    } else if (arg === '--api-url' && args[i + 1]) {
+      options.apiUrl = args[++i];
+    } else if (arg === '--api-key' && args[i + 1]) {
+      options.apiKey = args[++i];
+    } else if (arg === '--model' && args[i + 1]) {
+      options.model = args[++i];
     } else if (!arg.startsWith('-')) {
       inputPath = arg;
     }
