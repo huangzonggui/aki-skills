@@ -32,35 +32,86 @@ function getApiConfig(options?: Options): { apiUrl: string; apiKey: string; mode
     };
   }
 
-  // Try environment variables (Cloud Code / GLM compatible)
-  const apiKey = process.env.CLOUD_CODE_API_KEY
-    || process.env.GLM_API_KEY
-    || process.env.OPENAI_API_KEY
-    || process.env.API_KEY
-    || '';
+  // Try to read from ~/.cloud-code-api-key file
+  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+  const apiKeyFile = path.join(homeDir, '.cloud-code-api-key');
 
-  const apiUrl = process.env.CLOUD_CODE_API_URL
-    || process.env.GLM_API_URL
-    || process.env.OPENAI_API_URL
-    || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+  let apiKey = '';
+  let apiUrl = '';
+  let model = '';
 
-  const model = process.env.CLOUD_CODE_MODEL
-    || process.env.GLM_MODEL
-    || process.env.MODEL
-    || 'glm-4-flash';
+  if (fs.existsSync(apiKeyFile)) {
+    const content = fs.readFileSync(apiKeyFile, 'utf-8');
+    const lines = content.split('\n');
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('API_KEY=')) {
+        apiKey = trimmed.split('=')[1]?.trim() || '';
+      } else if (trimmed.startsWith('API_URL=')) {
+        apiUrl = trimmed.split('=')[1]?.trim() || '';
+      } else if (trimmed.startsWith('MODEL=')) {
+        model = trimmed.split('=')[1]?.trim() || '';
+      } else if (trimmed && !trimmed.startsWith('#')) {
+        // If line doesn't have =, treat it as raw API key
+        apiKey = trimmed;
+      }
+    }
+  }
+
+  // Fallback to environment variables
+  if (!apiKey) {
+    apiKey = process.env.CLOUD_CODE_API_KEY
+      || process.env.GLM_API_KEY
+      || process.env.OPENAI_API_KEY
+      || process.env.API_KEY
+      || '';
+  }
+
+  // Fallback for API URL
+  if (!apiUrl) {
+    // Use ANTHROPIC_BASE_URL from env, convert to OpenAI format
+    const anthropicUrl = process.env.ANTHROPIC_BASE_URL;
+    if (anthropicUrl) {
+      // Convert https://open.bigmodel.cn/api/anthropic to OpenAI format
+      apiUrl = anthropicUrl.replace('/anthropic', '/paas/v4/chat/completions');
+    }
+
+    apiUrl = apiUrl || process.env.CLOUD_CODE_API_URL
+      || process.env.GLM_API_URL
+      || process.env.OPENAI_API_URL
+      || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+  }
+
+  // Fallback for model
+  if (!model) {
+    model = process.env.CLOUD_CODE_MODEL
+      || process.env.GLM_MODEL
+      || process.env.MODEL
+      || process.env.ANTHROPIC_MODEL
+      || 'glm-4-flash';
+  }
 
   if (!apiKey) {
     throw new Error(`
 API Key not found!
 
-Please set one of:
-  - CLOUD_CODE_API_KEY environment variable
-  - GLM_API_KEY environment variable
-  - OPENAI_API_KEY environment variable
-  - API_KEY environment variable
-  - --api-key and --api-url command line options
+Please set your API key in one of these ways:
+
+1. Create/edit ~/.cloud-code-api-key with your API key:
+   echo "API_KEY=your-api-key-here" > ~/.cloud-code-api-key
+
+2. Or set environment variable:
+   export CLOUD_CODE_API_KEY="your-api-key"
+
+3. Or use command line option:
+   --api-key "your-api-key"
 
 Get your GLM API key at: https://open.bigmodel.cn/
+
+Detected configuration:
+  - API URL: ${apiUrl}
+  - Model: ${model}
 `);
   }
 
