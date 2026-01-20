@@ -60,6 +60,37 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
+// Smart highlighting rules based on content analysis
+function applySmartHighlights(text: string): string {
+  // Rule 1: Key phrases that indicate core insights
+  const coreInsightPatterns = [
+    /根本性的变化[:：](.+?)([。？！])/g,
+    /本质上[:：](.+?)([。？！])/g,
+    /核心是[:：](.+?)([。？！])/g,
+    /最重要的是[:：](.+?)([。？！])/g,
+  ];
+
+  for (const pattern of coreInsightPatterns) {
+    text = text.replace(pattern, (match, content, punct) => {
+      return `<mark>${content}</mark>${punct}`;
+    });
+  }
+
+  // Rule 2: Numbers/statements with strong emphasis (10倍, "重要", "核心" etc)
+  text = text.replace(/(\d+倍|最快|最强|最重要|核心|关键)/g, '<em>$1</em>');
+
+  // Rule 3: Product names (飞书录音豆, 录音豆, WhisperFlow, Typeless)
+  text = text.replace(/(飞书录音豆|录音豆|WhisperFlow|Typeless|iPhone|MacBook)/g, '<span class="highlight-pink">$1</span>');
+
+  // Rule 4: Benefits/outcomes (锻炼、提升、培养)
+  text = text.replace(/(锻炼|提升|培养|增强|改善)(.+?)([、。])/g, '<span class="highlight-green">$1$2</span>$3');
+
+  // Rule 5: Action items (从现在开始, 建议)
+  text = text.replace(/(从现在开始|我的建议是|建议|应该)(.+?)([。？！])/g, '<span class="highlight-blue">$1$2</span>$3');
+
+  return text;
+}
+
 function convertMarkdownToHtml(markdown: string): string {
   const lines = markdown.split('\n');
   const blocks: string[] = [];
@@ -77,13 +108,16 @@ function convertMarkdownToHtml(markdown: string): string {
   };
 
   const processInline = (text: string): string => {
-    // Bold
+    // First, apply smart highlighting
+    text = applySmartHighlights(text);
+
+    // Bold (preserve existing)
     text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 
     // Highlight/Mark (for manual highlighting)
     text = text.replace(/==(.+?)==/g, '<mark>$1</mark>');
 
-    // Italic
+    // Italic (preserve existing, but convert to em for red color)
     text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
 
     // Links
@@ -106,7 +140,8 @@ function convertMarkdownToHtml(markdown: string): string {
     const headingMatch = line.match(/^(#{2,6})\s+(.+)$/);
     if (headingMatch) {
       flushList();
-      blocks.push(`<h2>${processInline(headingMatch[2]!)}</h2>`);
+      const headingText = processInline(headingMatch[2]!);
+      blocks.push(`<h2>${headingText}</h2>`);
       continue;
     }
 
@@ -165,7 +200,7 @@ async function generateHtml(
   // Parse input
   const parsed = parseMarkdown(inputPath);
 
-  // Convert markdown to HTML
+  // Convert markdown to HTML with smart highlights
   const htmlBody = convertMarkdownToHtml(parsed.content);
 
   // Override title if provided
@@ -175,19 +210,22 @@ async function generateHtml(
   const templatePath = path.join(SKILL_DIR, 'scripts', 'template.html');
   const template = fs.readFileSync(templatePath, 'utf-8');
 
-  // Replace placeholders
-  // Default width is 600px as per requirements
+  // Replace placeholders - use global replace for TITLE
+  const titleMarker = '___TITLE_PLACEHOLDER___';
+  let html = template.replaceAll('{{TITLE}}', titleMarker);
+
+  // Now replace with actual title (after HTML encoding)
+  html = html.replaceAll(titleMarker, escapeHtml(title));
+
+  // Replace other placeholders
   const width = options.width ?? 600;
   const ratio = options.ratio ?? '3:4';
 
-  let html = template
-    .replace('{{TITLE}}', escapeHtml(title))
-    .replace('{{CONTENT}}', htmlBody)
-    .replace('{{RATIO}}', ratio)
-    .replace('{{TARGET_WIDTH}}', String(width));
+  html = html.replace('{{CONTENT}}', htmlBody);
+  html = html.replace('{{RATIO}}', ratio);
+  html = html.replace('{{TARGET_WIDTH}}', String(width));
 
   // Note: TARGET_HEIGHT is no longer used in template (hardcoded as 800/1000)
-  // But we keep it for backwards compatibility
   const targetHeight = ratio === '3:5' ? 1000 : 800;
   html = html.replace('{{TARGET_HEIGHT}}', String(targetHeight));
 
@@ -216,6 +254,13 @@ Examples:
 Note: Default width is 600px for optimal readability. Output sizes:
   - 3:4 ratio: 600 × 800px
   - 3:5 ratio: 600 × 1000px
+
+Smart Highlighting:
+  - Yellow (mark): Core insights, "本质上", "根本性的变化"
+  - Red (em): Emphasized words, numbers, "最重要", "核心"
+  - Pink: Product names, tools, brands
+  - Green: Benefits, outcomes (锻炼, 提升, 培养)
+  - Blue: Action items, suggestions
 `);
   process.exit(0);
 }

@@ -104,7 +104,23 @@ Block-level splitting:
 
 - **Usage Guide**: `references/usage.md`
 - **Template**: `scripts/template.html`
-- **Requirements**: `../../workflow/persona/prompts/ContextToHtml.md`
+
+## Smart Highlighting Rules
+
+The skill automatically applies highlights based on content analysis:
+
+| Color | Pattern | Example |
+|-------|---------|---------|
+| Yellow (`<mark>`) | Core insights | "本质上..."、"根本性的变化..." |
+| Red (`<em>`) | Emphasized words | "最重要"、"核心"、"10倍" |
+| Pink | Product names | "飞书录音豆"、"WhisperFlow" |
+| Green | Benefits | "锻炼..."、"提升..."、"培养..." |
+| Blue | Action items | "从现在开始..."、"我的建议是..." |
+
+To add manual highlights, use markdown:
+- `==text==` for yellow highlight
+- `**text**` for bold
+- `*text*` for red italic
 
 ## Troubleshooting
 
