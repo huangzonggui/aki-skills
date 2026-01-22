@@ -51,16 +51,17 @@ Optional local secrets (not committed):
 
 ## Usage
 
-Dry-run (no paid call):
+⚠️ **IMPORTANT**: Always run WITHOUT `--confirm` first to preview what will be generated!
 
+**Step 1 - Preview (DRY-RUN, NO COST):**
 ```bash
 python3 /path/to/skills/comfly-image-gen/scripts/comfly_image_gen.py \
   --topic /path/to/topic \
   --config /path/to/workflow.config.json
 ```
+Check the output - verify the number of images and prompt content are correct.
 
-Generate images (paid call):
-
+**Step 2 - Generate (PAID API CALL):**
 ```bash
 python3 /path/to/skills/comfly-image-gen/scripts/comfly_image_gen.py \
   --topic /path/to/topic \

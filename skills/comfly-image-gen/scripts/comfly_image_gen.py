@@ -382,8 +382,14 @@ def main() -> None:
         snippet = block["prompt"][:120] + ("..." if len(block["prompt"]) > 120 else "")
         print(f"- {block['label']}: {snippet}")
 
+    print(f"\n{'='*60}")
+    print(f"Total: {len(prompt_blocks)} image(s) will be generated")
+    print(f"Model: {settings['image_model']}")
+    print(f"{'='*60}")
+
     if not args.confirm:
-        print("\nDry-run only. Re-run with --confirm to generate images.")
+        print("\n🔴 DRY-RUN MODE - No API calls made.")
+        print("Re-run with --confirm to generate images (THIS COSTS MONEY).")
         return
 
     ensure_can_write(out_dir, args.force)
