@@ -220,20 +220,30 @@
 
         /* Lists */
         ul, ol {
-            margin: 20px 0;
-            padding-left: 30px;
+            margin: 20px 0 !important;
+            padding-left: 30px !important;
         }
 
         ul {
-            list-style-type: disc;
+            list-style-type: disc !important;
+            list-style-position: outside !important;
+        }
+
+        ul li {
+            font-size: 18px;
+            line-height: 1.8;
+            color: #333;
+            margin-bottom: 14px;
+            text-align: justify;
+            list-style-position: outside !important;
         }
 
         ul li::marker {
-            color: #667eea;
+            color: #667eea !important;
             font-size: 1.2em;
         }
 
-        li {
+        ol li {
             font-size: 18px;
             line-height: 1.8;
             color: #333;
