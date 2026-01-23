@@ -187,7 +187,7 @@ async function generateStyledHtmlWithLLM(articleText: string, config: { apiUrl: 
         return trimmed;
       }
       // Otherwise, wrap in <p> and convert inline **bold**
-      return `<p>${trimmed.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')}</p>`;
+      return `<p>${trimmed.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')}</p><br>`;
     })
     .filter(line => line !== '')
     .join('\n');
