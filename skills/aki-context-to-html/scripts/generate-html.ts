@@ -23,15 +23,6 @@ interface ParsedContent {
 
 // Get API configuration
 function getApiConfig(options?: Options): { apiUrl: string; apiKey: string; model: string } {
-  // Try options first
-  if (options?.apiUrl && options?.apiKey) {
-    return {
-      apiUrl: options.apiUrl,
-      apiKey: options.apiKey,
-      model: options.model || 'glm-4-flash',
-    };
-  }
-
   // Try to read from ~/.cloud-code-api-key file
   const homeDir = process.env.HOME || process.env.USERPROFILE || '';
   const apiKeyFile = path.join(homeDir, '.cloud-code-api-key');
@@ -57,6 +48,17 @@ function getApiConfig(options?: Options): { apiUrl: string; apiKey: string; mode
         apiKey = trimmed;
       }
     }
+  }
+
+  // Command-line options override config file
+  if (options?.apiUrl) {
+    apiUrl = options.apiUrl;
+  }
+  if (options?.apiKey) {
+    apiKey = options.apiKey;
+  }
+  if (options?.model) {
+    model = options.model;
   }
 
   // Fallback to environment variables
@@ -139,16 +141,15 @@ function parseMarkdown(filePath: string): ParsedContent {
     body = frontmatterMatch[2]!;
   }
 
-  // Extract title
+  // Extract title for display (keep original Markdown in body)
   let title = frontmatter.title ?? '';
   if (!title) {
     const h1Match = body.match(/^#\s+(.+)$/m);
     if (h1Match) title = h1Match[1]!;
   }
 
-  // Remove H1 from body if it exists
-  body = body.replace(/^#\s+.+\r?\n?/m, '');
-
+  // Return ORIGINAL Markdown content (don't remove H1 or any formatting)
+  // The LLM will convert Markdown to HTML
   return { title: title || 'Untitled', content: body.trim() };
 }
 
@@ -162,47 +163,88 @@ function escapeHtml(text: string): string {
 
 // Call LLM API (GLM/OpenAI compatible) to generate styled HTML
 async function generateStyledHtmlWithLLM(articleText: string, config: { apiUrl: string; apiKey: string; model: string }): Promise<string> {
-  const prompt = `You are an expert content editor and visual designer specializing in Chinese content.
+  // Pre-convert basic Markdown to HTML to ensure consistency
+  let preConverted = articleText
+    // Convert # headings (H1 - main title, KEEP IT!)
+    .replace(/^#\s+(.+)$/gm, '<h1>$1</h1>')
+    // Convert ## headings (H2 - sections)
+    .replace(/^##\s+(.+)$/gm, '<h2>$1</h2>')
+    // Convert ### headings (H3 - subsections)
+    .replace(/^###\s+(.+)$/gm, '<h3>$1</h3>')
+    // Convert - lists
+    .replace(/^-\s+(.+)$/gm, '<li>$1</li>')
+    // Wrap consecutive <li> in <ul>
+    .replace(/(<li>.*<\/li>\n?)+/g, '<ul>\n$&</ul>')
+    // Convert > blockquotes
+    .replace(/^>\s+(.+)$/gm, '<blockquote>$1</blockquote>')
+    // Convert paragraphs (lines that don't start with block tag)
+    .split('\n')
+    .map(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return '';
+      // Check if line starts with a block-level tag
+      if (/^<(h[1-6]|ul|li|blockquote|hr)/.test(trimmed)) {
+        return trimmed;
+      }
+      // Otherwise, wrap in <p> and convert inline **bold**
+      return `<p>${trimmed.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')}</p>`;
+    })
+    .filter(line => line !== '')
+    .join('\n');
 
-Your task is to take the provided article and wrap it in semantic HTML for a high-impact, modern layout.
+  const prompt = `你是一位专业的中文内容编辑，擅长将 Markdown 内容转换为语义化的 HTML。
 
-### CORE PRINCIPLES:
-1. **NO DARK BACKGROUNDS**: Do not use dark colors as backgrounds. Use light backgrounds (#ffffff, #f8fafc) only.
+你的任务是对提供的 HTML 进行智能格式化高亮。不要改变结构，只添加语义化标签。
 
-2. **VISUAL HIERARCHY**:
-   - Use <h1> for the absolute primary title/hook.
-   - Use <h2> for major arguments or section leads with red left border.
-   - Use <h3> for supporting sub-points.
-   - Headers should be LARGE and act as primary anchors.
+### 关键要求：
+1. **保持现有 HTML 结构**：保留所有 <h1>, <h2>, <h3>, <p>, <ul>, <li>, <blockquote> 标签
+2. **只添加高亮标签**：添加 <mark>, <em>, <strong> 等语义标签
+3. **不要添加内联样式**：不要添加 style="..." 属性
+4. **不要添加 div 包装**：不要用 <div> 标签包裹内容
+5. **段落间需要空行**：每个 <p> 标签前后要有换行，确保内容有呼吸感
 
-3. **WORD-FOR-WORD**: DO NOT CHANGE A SINGLE WORD of the original content.
+### 智能高亮规则：
+你必须识别并标记：
 
-4. **STYLING ELEMENTS**:
-   - Use <mark> for key quotes or "gold nuggets" (most important insights).
-   - Use <em> for keywords highlighted in RED (product names, important concepts).
-   - Use <strong> for important phrases needing bold.
-   - Use <blockquote> for summary conclusions with blue left border.
+**<mark> 金句高亮**（最重要）：
+- 识别文章中的"金句"——即最有价值、最值得引用的句子
+- 金句特征：精炼总结、反常识观点、核心论点、启发性结论
+- 每篇文章标记 3-5 个金句，用 <mark> 标签包裹
+- 金句示例：
+  * "AI有泡沫不代表就全盘否定不参与，每一场风口都会伴随泡沫"
+  * "现在的泡沫，可能就是明天的基建红利"
+  * "我们要做的是避开泡沫，拥抱AI价值"
 
-5. **STRUCTURE**:
-   - Group related paragraphs under <h3> subheaders.
-   - Use <hr> to separate major sections.
-   - Ensure clear visual flow.
+**<em> 强调标记**：
+- 产品名称、公司名：Oracle, CoreWeave, OpenAI, Google, DeepSeek等
+- 技术术语：CDS, GPU, TPU, AI, API等
+- 数据强调：2-3年、6年、美股七姐妹等
 
-6. **CLEAN FINISH**: No trailing punctuation in headers unless in source.
+**<strong> 一般强调**：
+- 已有粗体保持不变，用于一般强调
 
-### OUTPUT:
-Return ONLY the HTML content. No markdown, no <html> or <body> tags, no code blocks.
+### 金句识别标准（用 <mark> 标记）：
+1. **总结性观点** - 对整篇文章的核心结论
+2. **反常识观点** - 与大众认知不同的见解
+3. **启发性结论** - 给读者带来新认知的句子
+4. **精炼表达** - 短小精悍但含义深刻的句子
+5. **行动指引** - 告诉读者应该怎么做的句子
 
-Example structure:
-<h1>Main Title</h1>
-<p>Introduction with <mark>key insight</mark> and <em>keyword</em>.</p>
-<h2>Section Title</h2>
-<h3>Subsection</h3>
-<p>Content...</p>
-<blockquote>Key conclusion</blockquote>
+### 示例：
+- <em>Oracle</em> - 公司名用红色强调
+- <mark>现在的泡沫，可能就是明天的基建红利</mark> - 金句用黄色高亮
+- <strong>关键点</strong> - 一般强调
 
-CONTENT:
-${articleText}`;
+### 输入 HTML：
+${preConverted}
+
+### 输出要求：
+返回增强后的 HTML。注意：
+1. 所有的 <h2> 标签必须添加 class="section-title"
+2. 所有的 <blockquote> 标签保持不变
+3. 只添加高亮标签，不要改变其他任何内容
+4. 确保段落之间有换行（<p> 标签前后要有 \\n）
+5. 不要添加代码块标记。`;
 
   try {
     const response = await fetch(config.apiUrl, {
@@ -247,11 +289,31 @@ ${articleText}`;
       .replace(/<\/?head[^>]*>.*?<\/head>/gis, '')
       .trim();
 
+    // Clean up AI-generated inline styles and wrapper divs
+    cleaned = cleanAIOutput(cleaned);
+
     return cleaned;
   } catch (error) {
     console.error('LLM API Error:', error);
     throw new Error(`Failed to generate styled HTML: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+// Clean up AI-generated HTML
+function cleanAIOutput(html: string): string {
+  let cleaned = html;
+
+  // Remove all inline style attributes
+  cleaned = cleaned.replace(/\s*style="[^"]*"/gi, '');
+
+  // Remove ALL div tags (both opening and closing) - AI should only use semantic tags
+  cleaned = cleaned.replace(/<div[^>]*>/gi, '');
+  cleaned = cleaned.replace(/<\/div>/gi, '');
+
+  // Clean up extra blank lines
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
+  return cleaned.trim();
 }
 
 async function generateHtml(
