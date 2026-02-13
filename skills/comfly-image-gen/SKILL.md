@@ -1,6 +1,6 @@
 ---
 name: comfly-image-gen
-description: Generate images via the Comfly proxy API (Nano Banana / Nano Banana HD) from image_prompts.md and save outputs. Use when asked to run Comfly/Nano Banana image generation.
+description: Generate images via the Comfly proxy API from image_prompts.md and save outputs. Uses unified config at ~/.config/comfly/config.
 ---
 
 # Comfly Image Generation
@@ -10,62 +10,57 @@ Use the bundled script to call the Comfly proxy API and generate images from `im
 ## Requirements
 
 - A topic folder path (contains `outputs/image_prompts.md`).
-- A config path for `workflow.config.json` (or set env vars).
-- API key must stay private (use env var or config, never print it).
+- Unified config file: `~/.config/comfly/config`.
 
 ## Key safety
 
 - Do NOT hardcode or echo the API key in logs.
-- Prefer `COMFLY_API_KEY` in the environment.
-- If the key is stored in `workflow.config.json`, do not commit it.
+- If keys are stored in `~/.config/comfly/config`, do not commit or share it.
 
 ## Configuration
 
-Add `image_api` to `workflow.config.json`:
+`~/.config/comfly/config` is the source of truth for all skills.
 
-```json
-{
-  "image_api": {
-    "base_url": "https://<comfly-proxy-host>",
-    "path": "/v1/images/generations",
-    "api_key": "",
-    "image_model": "nano-banana",
-    "response_format": "url",
-    "aspect_ratio": "4:5"
-  }
-}
+Write it like this:
+
+```bash
+COMFLY_API_KEY=...
+COMFLY_API_BASE_URL=https://ai.comfly.chat
+COMFLY_IMAGE_MODEL=nano-banana-pro
 ```
 
-Model options:
-- `nano-banana` (default)
-- `nano-banana-hd` (4K / pro)
+Quick bootstrap on a new machine:
 
-Env overrides:
-- `COMFLY_API_KEY`
-- `COMFLY_API_BASE_URL`
-- `COMFLY_IMAGE_MODEL`
+```bash
+mkdir -p ~/.config/comfly
+cat > ~/.config/comfly/config <<'EOF'
+COMFLY_API_KEY=your-api-key
+COMFLY_API_BASE_URL=https://ai.comfly.chat
+COMFLY_IMAGE_MODEL=nano-banana-pro
+EOF
+```
 
-Optional local secrets (not committed):
-- Create `skills/comfly-image-gen/.env` and put `COMFLY_API_KEY=...`
-- The script will auto-load this file at runtime.
+Read logic (important):
+- Script reads `~/.config/comfly/config` by default.
+- You can override the config path with `COMFLY_SHARED_CONFIG_PATH=/path/to/config`.
+- Existing process env vars (`COMFLY_API_KEY` / `COMFLY_API_BASE_URL` / `COMFLY_IMAGE_MODEL`) take precedence.
+- `--model` is intentionally unsupported.
+- `--config` is optional JSON override for request body fields (size/n/response format etc.).
 
 ## Usage
 
-⚠️ **IMPORTANT**: Always run WITHOUT `--confirm` first to preview what will be generated!
+Dry-run (no paid call):
 
-**Step 1 - Preview (DRY-RUN, NO COST):**
 ```bash
 python3 /path/to/skills/comfly-image-gen/scripts/comfly_image_gen.py \
-  --topic /path/to/topic \
-  --config /path/to/workflow.config.json
+  --topic /path/to/topic
 ```
-Check the output - verify the number of images and prompt content are correct.
 
-**Step 2 - Generate (PAID API CALL):**
+Generate images (paid call):
+
 ```bash
 python3 /path/to/skills/comfly-image-gen/scripts/comfly_image_gen.py \
   --topic /path/to/topic \
-  --config /path/to/workflow.config.json \
   --confirm
 ```
 

@@ -18,11 +18,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+DEFAULT_SHARED_CONFIG_PATH = Path.home() / ".config" / "comfly" / "config"
+DEFAULT_IMAGE_MODEL = "nano-banana-pro"
+
 DEFAULT_CONFIG: Dict[str, Any] = {
     "image_api": {
         "token_url": "",
         "use_token_url": False,
-        "base_url": "",
+        "base_url": "https://ai.comfly.chat",
         "path": "/v1/images/generations",
         "api_key": "",
         "auth_header": "Authorization",
@@ -41,8 +44,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "request_template": {},
     }
 }
-
-
 def merge_dicts(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     merged = dict(base)
     for key, value in override.items():
@@ -63,23 +64,74 @@ def load_config(path: Path) -> Dict[str, Any]:
     return merge_dicts(DEFAULT_CONFIG, data)
 
 
-def env_or(value: str, env_key: str) -> str:
-    env_val = os.environ.get(env_key, "").strip()
-    return env_val or value
-
-
-def load_dotenv(dotenv_path: Path) -> None:
-    if not dotenv_path.exists():
+def load_env_file(path: Path, overwrite_existing: bool = False) -> None:
+    if not path.exists():
         return
-    for raw in dotenv_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+    for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
         key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
+        if not key:
+            continue
+        if not overwrite_existing and key in os.environ:
+            continue
+        os.environ[key] = value.strip().strip("'\"")
+
+
+def normalize_base_url(value: str) -> str:
+    raw = value.strip()
+    if not raw:
+        return ""
+
+    for suffix in ("/v1/chat/completions", "/v1/images/generations"):
+        if raw.endswith(suffix):
+            raw = raw[: -len(suffix)]
+            break
+
+    return raw.rstrip("/")
+
+
+def normalize_image_bytes(raw: bytes) -> Tuple[bytes, int]:
+    if not raw:
+        return raw, 0
+
+    def is_webp_at(data: bytes, idx: int) -> bool:
+        return idx + 12 <= len(data) and data[idx : idx + 4] == b"RIFF" and data[idx + 8 : idx + 12] == b"WEBP"
+
+    signatures = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a")
+    for sig in signatures:
+        if raw.startswith(sig):
+            return raw, 0
+    if is_webp_at(raw, 0):
+        return raw, 0
+
+    candidates: List[int] = []
+    for sig in signatures:
+        idx = raw.find(sig)
+        if idx > 0:
+            candidates.append(idx)
+    riff_idx = raw.find(b"RIFF")
+    if riff_idx > 0 and is_webp_at(raw, riff_idx):
+        candidates.append(riff_idx)
+
+    if not candidates:
+        return raw, 0
+    strip_len = min(candidates)
+    return raw[strip_len:], strip_len
+
+
+def detect_image_format(raw: bytes) -> str:
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if raw.startswith(b"GIF87a") or raw.startswith(b"GIF89a"):
+        return "gif"
+    if len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "webp"
+    return ""
 
 
 def slugify(text: str) -> str:
@@ -316,8 +368,7 @@ def main() -> None:
     parser.add_argument("--prompts", default=None, help="Path to image_prompts.md")
     parser.add_argument("--out", default=None, help="Output directory for images")
     parser.add_argument("--meta", default=None, help="Metadata output JSON path")
-    parser.add_argument("--config", default=None, help="Override workflow.config.json")
-    parser.add_argument("--model", default=None, help="Override image model")
+    parser.add_argument("--config", default=None, help="Optional JSON override file (expects image_api object)")
     parser.add_argument("--size", default=None, help="Override image size")
     parser.add_argument("--n", type=int, default=None, help="Images per prompt")
     parser.add_argument("--response-format", default=None, help="Override response format")
@@ -330,19 +381,37 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    dotenv_path = Path(__file__).resolve().parent / ".env"
-    load_dotenv(dotenv_path)
-
-    root = Path(__file__).resolve().parents[1]
-    config_path = Path(args.config).expanduser().resolve() if args.config else root / "workflow.config.json"
-    config = load_config(config_path)
+    shared_config_path = Path(
+        os.environ.get("COMFLY_SHARED_CONFIG_PATH", str(DEFAULT_SHARED_CONFIG_PATH))
+    ).expanduser()
+    # Unified shared config is the single source of truth.
+    load_env_file(shared_config_path)
+    config: Dict[str, Any] = DEFAULT_CONFIG
+    if args.config:
+        config_path = Path(args.config).expanduser().resolve()
+        if not config_path.exists():
+            raise SystemExit(f"Config file not found: {config_path}")
+        config = load_config(config_path)
     settings = dict(config.get("image_api", {}))
 
-    settings["api_key"] = env_or(settings.get("api_key", ""), "COMFLY_API_KEY")
-    settings["base_url"] = env_or(settings.get("base_url", ""), "COMFLY_API_BASE_URL")
-    settings["image_model"] = env_or(settings.get("image_model", ""), "COMFLY_IMAGE_MODEL")
-    if args.model:
-        settings["image_model"] = args.model
+    settings["api_key"] = str(
+        os.environ.get("COMFLY_API_KEY", settings.get("api_key", ""))
+    ).strip()
+
+    env_base_url = str(os.environ.get("COMFLY_API_BASE_URL", "")).strip()
+    env_api_url = str(os.environ.get("COMFLY_API_URL", "")).strip()
+    cfg_base_url = str(settings.get("base_url", "")).strip()
+    settings["base_url"] = normalize_base_url(env_base_url or env_api_url or cfg_base_url)
+
+    env_image_model = str(os.environ.get("COMFLY_IMAGE_MODEL", "")).strip()
+    env_model_alias = str(
+        os.environ.get("COMFLY_MODEL", os.environ.get("COMFLY_CHAT_MODEL", ""))
+    ).strip()
+    cfg_image_model = str(settings.get("image_model", "")).strip()
+    resolved_model = env_image_model or cfg_image_model or env_model_alias or DEFAULT_IMAGE_MODEL
+    settings["image_model"] = resolved_model
+
+    settings["path"] = str(os.environ.get("COMFLY_IMAGE_PATH", settings.get("path", "/v1/images/generations"))).strip()
     if args.size:
         settings["size"] = args.size
     if args.n is not None:
@@ -351,11 +420,20 @@ def main() -> None:
         settings["response_format"] = args.response_format
 
     if not settings.get("base_url"):
-        raise SystemExit("Missing image_api.base_url (or COMFLY_API_BASE_URL).")
-    if not settings.get("image_model"):
-        raise SystemExit("Missing image_api.image_model (or COMFLY_IMAGE_MODEL).")
+        raise SystemExit(
+            "Missing base URL. Set COMFLY_API_BASE_URL (or COMFLY_API_URL) in "
+            f"{shared_config_path}."
+        )
     if not settings.get("api_key"):
-        raise SystemExit("Missing image_api.api_key (or COMFLY_API_KEY).")
+        raise SystemExit(
+            "Missing API key. Set COMFLY_API_KEY in "
+            f"{shared_config_path}."
+        )
+    if not settings.get("image_model"):
+        raise SystemExit(
+            "Missing image model. Set COMFLY_IMAGE_MODEL in "
+            f"{shared_config_path}."
+        )
     if settings.get("use_token_url"):
         raise SystemExit(
             "Token exchange is not implemented yet; set image_api.use_token_url to false."
@@ -381,15 +459,10 @@ def main() -> None:
     for block in prompt_blocks:
         snippet = block["prompt"][:120] + ("..." if len(block["prompt"]) > 120 else "")
         print(f"- {block['label']}: {snippet}")
-
-    print(f"\n{'='*60}")
-    print(f"Total: {len(prompt_blocks)} image(s) will be generated")
-    print(f"Model: {settings['image_model']}")
-    print(f"{'='*60}")
+    print(f"Image model: {settings['image_model']}")
 
     if not args.confirm:
-        print("\n🔴 DRY-RUN MODE - No API calls made.")
-        print("Re-run with --confirm to generate images (THIS COSTS MONEY).")
+        print("\nDry-run only. Re-run with --confirm to generate images.")
         return
 
     ensure_can_write(out_dir, args.force)
@@ -421,6 +494,16 @@ def main() -> None:
     for block in prompt_blocks:
         payload = build_request_body(settings, block["prompt"], block["negative_prompt"])
         response = request_json(api_url, headers, payload, timeout)
+        actual_model = ""
+        if isinstance(response, dict):
+            model_val = response.get("model")
+            if isinstance(model_val, str):
+                actual_model = model_val.strip()
+        if actual_model and actual_model != settings["image_model"]:
+            print(
+                f"Warning: requested '{settings['image_model']}', API returned '{actual_model}'.",
+                file=sys.stderr,
+            )
         images = extract_images(response)
         if not images:
             raise SystemExit("No images returned by API.")
@@ -430,6 +513,8 @@ def main() -> None:
             "label": block["label"],
             "prompt": block["prompt"],
             "negative_prompt": block["negative_prompt"],
+            "requested_model": settings["image_model"],
+            "response_model": actual_model,
             "response": redact_payload(response),
             "outputs": [],
         }
@@ -438,6 +523,14 @@ def main() -> None:
             filename = f"{label_slug}-{idx}.png"
             if image["kind"] == "b64":
                 data = base64.b64decode(image["data"])
+                data, stripped = normalize_image_bytes(data)
+                if stripped:
+                    print(
+                        f"Warning: stripped {stripped} unexpected leading bytes from image payload.",
+                        file=sys.stderr,
+                    )
+                ext = detect_image_format(data) or "png"
+                filename = f"{label_slug}-{idx}.{ext}"
                 (out_dir / filename).write_bytes(data)
                 item_record["outputs"].append(str(out_dir / filename))
             elif image["kind"] == "url":
