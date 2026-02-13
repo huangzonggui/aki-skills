@@ -35,6 +35,12 @@ npx -y bun ${SKILL_DIR}/scripts/wechat-browser.ts --markdown article.md --images
 
 # With explicit parameters
 npx -y bun ${SKILL_DIR}/scripts/wechat-browser.ts --title "标题" --content "内容" --image img1.png --image img2.png --submit
+
+# Optional: apply pre-submit settings (原创/创作来源/赞赏/广告/合集)
+npx -y bun ${SKILL_DIR}/scripts/wechat-browser.ts --markdown article.md --images ./images/ --submit --pre-submit-settings
+
+# Optional: skip extra settings for troubleshooting
+npx -y bun ${SKILL_DIR}/scripts/wechat-browser.ts --markdown article.md --images ./images/ --submit --skip-pre-submit-settings
 ```
 
 ### Article (文章) - Full markdown with formatting
@@ -66,6 +72,9 @@ npx -y bun ${SKILL_DIR}/scripts/wechat-article.ts --markdown article.md --theme 
 | Auto title compression | ✓ (to 20 chars) | ✗ |
 | Content compression | ✓ (to 1000 chars) | ✗ |
 | Themes | ✗ | ✓ (default, grace, simple) |
+
+> Image-text default behavior: upload image + fill title/content + apply pre-submit settings + save draft.
+> Use `--skip-pre-submit-settings` only when you intentionally want to bypass those settings.
 
 ## Troubleshooting
 

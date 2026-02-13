@@ -15,31 +15,33 @@ Create a reusable workflow that combines a fixed high-density constraint block, 
 python scripts/generate_handnote_cover.py --article /path/to/article.md
 ```
 
-This writes a prompt to `imgs/prompts/handnote-cover.md` and generates `imgs/handnote-cover.png` next to the article.
+This writes a prompt to `imgs/prompts/handnote-cover.md` and generates `imgs/handnote-cover.<YYYYmmdd-HHMMSS>.png` next to the article by default.
+If you pass `--output`, it still avoids overwrite unless you also pass `--overwrite`.
 
 ## Workflow
 
 1. Read the full article without summarizing.
-2. Append `references/constraints.md` and the shared style template `../aki-style-library/references/styles/handnote.md`.
-3. Write a prompt file and generate the image with Gemini Web.
+2. Append `references/constraints.md` and the shared style template `../aki-style-library/references/styles/手绘逻辑信息艺术设计师.md`.
+3. Write a prompt file and generate the image with Comfly API.
 
 ## Options
 
 - `--article`: Article markdown path (required)
-- `--output`: Output image path (default: `imgs/handnote-cover.png`)
+- `--output`: Output image path (default when omitted: `imgs/handnote-cover.<YYYYmmdd-HHMMSS>.png`)
 - `--prompt-out`: Prompt markdown output path (default: `imgs/prompts/handnote-cover.md`)
 - `--title`: Override title text (default: first `#` heading)
 - `--prompt-only`: Only write the prompt file, skip image generation
-- `--session-id`: Gemini session ID (optional)
-- `--model`: Gemini model id (optional)
+- `--overwrite`: Explicitly allow overwriting an existing output image path (default: do not overwrite)
+- `--session-id`: Legacy option, ignored in Comfly API mode
+- `--model`: Legacy option, ignored (model is locked to `nano-banana-pro`)
 
 ## Notes
 
 - Do not use baoyu cover/xhs skills for this flow; keep full content density.
-- If Gemini is not logged in, run the login step in `baoyu-gemini-web` first.
+- Configure Comfly in `~/.config/comfly/config` (`COMFLY_API_KEY`, `COMFLY_API_BASE_URL` or `COMFLY_API_URL`).
 
 ## Resources
 
 - High-density constraints: `references/constraints.md`
-- Handnote style template: `../aki-style-library/references/styles/handnote.md`
+- Handnote style template: `../aki-style-library/references/styles/手绘逻辑信息艺术设计师.md`
 - Generator script: `scripts/generate_handnote_cover.py`

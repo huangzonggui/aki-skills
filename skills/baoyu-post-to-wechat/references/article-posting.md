@@ -20,7 +20,9 @@ npx -y bun ./scripts/wechat-article.ts --markdown article.md --author "作者名
 | Parameter | Description |
 |-----------|-------------|
 | `--markdown <path>` | Markdown file to convert and post |
-| `--theme <name>` | Theme: default, grace, or simple |
+| `--theme <name>` | Theme: default, grace, simple, or huasheng |
+| `--skip-title` | Skip auto-filling the title |
+| `--manual-paste` | Pause for manual paste before inserting images |
 | `--title <text>` | Override title (auto-extracted from markdown) |
 | `--author <name>` | Author name (default: 宝玉) |
 | `--summary <text>` | Article summary |
@@ -53,7 +55,7 @@ Regular paragraph with **bold** and *italic*.
 
 ## Image Handling
 
-1. **Parse**: Images in markdown are replaced with `[[IMAGE_PLACEHOLDER_N]]`
+1. **Parse**: Images in markdown are replaced with `IMAGE_PLACEHOLDER_N`
 2. **Render**: HTML is generated with placeholders in text
 3. **Paste**: HTML content is pasted into WeChat editor
 4. **Replace**: For each placeholder:

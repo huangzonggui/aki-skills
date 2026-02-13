@@ -1,0 +1,69 @@
+/**
+ * 花生编辑器风格（近似）
+ * 红色主色 + H1左侧竖条 + H2红底白字条
+ */
+
+:root {
+  --md-primary-color: #d93630;
+}
+
+/* ==================== 标题样式 ==================== */
+h1 {
+  margin: 0 8px 1em;
+  padding: 0.2em 0 0.2em 0.75em;
+  border-left: 6px solid var(--md-primary-color);
+  color: #111;
+  font-size: calc(var(--md-font-size) * 1.45);
+  font-weight: 800;
+  text-align: left;
+}
+
+h2 {
+  display: block;
+  margin: 2em 8px 1em;
+  padding: 0.45em 0.9em;
+  background: var(--md-primary-color);
+  color: #fff;
+  font-size: calc(var(--md-font-size) * 1.15);
+  font-weight: 700;
+  border-radius: 6px;
+}
+
+h3 {
+  margin: 1.6em 8px 0.75em;
+  padding-left: 10px;
+  border-left: 4px solid var(--md-primary-color);
+  color: #111;
+  font-size: calc(var(--md-font-size) * 1.05);
+  font-weight: 700;
+}
+
+/* ==================== 段落 ==================== */
+p {
+  margin: 1.25em 8px;
+  letter-spacing: 0.02em;
+  color: #1a1a1a;
+}
+
+/* ==================== 列表 ==================== */
+ul {
+  list-style: disc;
+  padding-left: 1.5em;
+}
+
+li {
+  margin: 0.5em 8px;
+}
+
+/* ==================== 引用块 ==================== */
+blockquote {
+  padding: 0.9em 1em;
+  border-left: 4px solid var(--md-primary-color);
+  background: #fafafa;
+  color: #333;
+}
+
+/* ==================== 图片 ==================== */
+img {
+  border-radius: 8px;
+}

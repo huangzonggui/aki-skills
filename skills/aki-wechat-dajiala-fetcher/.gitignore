@@ -1,0 +1,6 @@
+agent.json
+.env
+.env.*
+output/
+api_docs/
+__pycache__/

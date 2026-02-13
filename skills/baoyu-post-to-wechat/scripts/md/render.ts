@@ -24,11 +24,11 @@ import {
   highlightAndFormatCode,
 } from "./utils/languages.js";
 
-type ThemeName = "default" | "grace" | "simple";
+type ThemeName = "default" | "grace" | "simple" | "huasheng";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const THEME_DIR = path.resolve(SCRIPT_DIR, "themes");
-const THEME_NAMES: ThemeName[] = ["default", "grace", "simple"];
+const THEME_NAMES: ThemeName[] = ["default", "grace", "simple", "huasheng"];
 
 const DEFAULT_STYLE = {
   primaryColor: "#0F4C81",
@@ -57,6 +57,7 @@ interface IOpts {
   isMacCodeBlock?: boolean;
   isShowLineNumber?: boolean;
   themeMode?: "light" | "dark";
+  themeName?: string;
 }
 
 interface RendererAPI {
@@ -175,11 +176,81 @@ export function initRenderer(opts: IOpts = {}): RendererAPI {
     return opts;
   }
 
+  function getInlineStyle(styleLabel: string, tag: string): string {
+    if (opts.themeName !== "huasheng") return "";
+
+    if (tag === "h1") {
+      return [
+        "margin:0 8px 1em",
+        "padding:0.2em 0 0.2em 0.75em",
+        "border-left:6px solid #d93630",
+        "color:#111",
+        "font-size:1.45em",
+        "font-weight:800",
+        "text-align:left",
+      ].join("; ");
+    }
+
+    if (tag === "h2") {
+      return [
+        "margin:2em 8px 1em",
+        "padding:0.45em 0.9em",
+        "background:#d93630",
+        "color:#fff",
+        "font-size:1.15em",
+        "font-weight:700",
+        "border-radius:6px",
+        "display:block",
+      ].join("; ");
+    }
+
+    if (tag === "h3") {
+      return [
+        "margin:1.6em 8px 0.75em",
+        "padding-left:10px",
+        "border-left:4px solid #d93630",
+        "color:#111",
+        "font-size:1.05em",
+        "font-weight:700",
+      ].join("; ");
+    }
+
+    if (tag === "p") {
+      return [
+        "margin:0 8px 1em",
+        "line-height:1.85",
+      ].join("; ");
+    }
+
+    if (styleLabel === "strong") {
+      return [
+        "color:#d93630",
+        "font-weight:700",
+      ].join("; ");
+    }
+
+    if (tag === "blockquote") {
+      return [
+        "margin:1.6em 8px",
+        "padding:16px 18px",
+        "border-left:6px solid #d93630",
+        "background:#fff2f1",
+        "color:#222",
+        "font-size:1.02em",
+        "line-height:1.7",
+      ].join("; ");
+    }
+
+    return "";
+  }
+
   function styledContent(styleLabel: string, content: string, tagName?: string): string {
     const tag = tagName ?? styleLabel;
     const className = `${styleLabel.replace(/_/g, "-")}`;
     const headingAttr = /^h\d$/.test(tag) ? " data-heading=\"true\"" : "";
-    return `<${tag} class="${className}"${headingAttr}>${content}</${tag}>`;
+    const inlineStyle = getInlineStyle(styleLabel, tag);
+    const styleAttr = inlineStyle ? ` style="${inlineStyle}"` : "";
+    return `<${tag} class="${className}"${headingAttr}${styleAttr}>${content}</${tag}>`;
   }
 
   function addFootnote(title: string, link: string): number {
@@ -234,25 +305,95 @@ export function initRenderer(opts: IOpts = {}): RendererAPI {
   };
 
   const renderer: RendererObject = {
-    heading({ tokens, depth }: Tokens.Heading) {
-      const text = this.parser.parseInline(tokens);
-      const tag = `h${depth}`;
+    heading(arg: any, depth?: number) {
+      if (arg && typeof arg === "object" && "tokens" in arg) {
+        const token = arg as Tokens.Heading;
+        const content = token.tokens
+          ? marked.Parser.parseInline(token.tokens)
+          : escapeHtml(token.text ?? "");
+        const tag = `h${token.depth}`;
+        if (opts.themeName === "huasheng" && tag === "h1") return "";
+        return styledContent(tag, content);
+      }
+      const text = String(arg ?? "");
+      const tag = `h${depth ?? 1}`;
+      if (opts.themeName === "huasheng" && tag === "h1") return "";
       return styledContent(tag, text);
     },
 
-    paragraph({ tokens }: Tokens.Paragraph): string {
-      const text = this.parser.parseInline(tokens);
-      const isFigureImage = text.includes("<figure") && text.includes("<img");
-      const isEmpty = text.trim() === "";
-      if (isFigureImage || isEmpty) {
-        return text;
+    paragraph(arg: any): string {
+      let inline: string;
+      if (arg && typeof arg === "object" && "tokens" in arg) {
+        const token = arg as Tokens.Paragraph;
+        inline = token.tokens
+          ? marked.Parser.parseInline(token.tokens)
+          : escapeHtml(token.text ?? "");
+      } else {
+        inline = String(arg ?? "");
       }
-      return styledContent("p", text);
+      const isFigureImage = inline.includes("<figure") && inline.includes("<img");
+      const isEmpty = inline.trim() === "";
+      if (isFigureImage || isEmpty) {
+        return inline;
+      }
+      // huasheng 模式严格保留原段落，不做自动拆句，避免吞掉作者手动换行。
+      if (opts.themeName === "huasheng") {
+        return styledContent("p", inline);
+      }
+      // Respect explicit hard line breaks generated by markdown parser.
+      if (inline.includes("<br")) {
+        return styledContent("p", inline);
+      }
+
+      // 智能分段：创造"阅读呼吸感"
+      // 将中文句子切成 [文本+结尾标点] 的稳定片段，避免错位拼接导致内容重复。
+      const chunks = (inline.match(/[^。！？；]+[。！？；]?/g) ?? [inline])
+        .map((part) => part.trim())
+        .filter(Boolean);
+      const breathingParagraphs: string[] = [];
+      let currentParagraph = "";
+      let sentenceCount = 0;
+      const groupSize = opts.themeName === "huasheng" ? 1 : 2;
+
+      for (const chunk of chunks) {
+        currentParagraph += chunk;
+        sentenceCount++;
+
+        // huasheng: 每句一换段；其他主题: 每 2 句换段；分号提前换段
+        if (sentenceCount >= groupSize || chunk.endsWith("；")) {
+          breathingParagraphs.push(currentParagraph.trim());
+          currentParagraph = "";
+          sentenceCount = 0;
+        }
+      }
+
+      if (currentParagraph.trim()) {
+        breathingParagraphs.push(currentParagraph.trim());
+      }
+
+      // 如果只有一个段落，返回原始格式
+      if (breathingParagraphs.length <= 1) {
+        return styledContent("p", inline);
+      }
+
+      // 多个段落：每个段落独立渲染，最后一个用普通 <p>，其他的用 <br> 分隔
+      return breathingParagraphs.map((p, index) => {
+        if (index === breathingParagraphs.length - 1) {
+          return styledContent("p", p);
+        }
+        return styledContent("p", p) + '<br style="line-height: 0.6em;">';
+      }).join("");
     },
 
-    blockquote({ tokens }: Tokens.Blockquote): string {
-      const text = this.parser.parse(tokens);
-      return styledContent("blockquote", text);
+    blockquote(arg: any): string {
+      let inner: string;
+      if (arg && typeof arg === "object" && "tokens" in arg) {
+        const token = arg as Tokens.Blockquote;
+        inner = token.tokens ? marked.Parser.parse(token.tokens) : escapeHtml(token.text ?? "");
+      } else {
+        inner = String(arg ?? "");
+      }
+      return styledContent("blockquote", inner);
     },
 
     code({ text, lang = "" }: Tokens.Code): string {
@@ -299,93 +440,128 @@ export function initRenderer(opts: IOpts = {}): RendererAPI {
       return styledContent("codespan", escapedText, "code");
     },
 
-    list({ ordered, items, start = 1 }: Tokens.List) {
-      listOrderedStack.push(ordered);
-      listCounters.push(Number(start));
+    list(arg: any, ordered?: boolean, start: number = 1) {
+      if (arg && typeof arg === "object" && "items" in arg) {
+        const token = arg as Tokens.List;
+        listOrderedStack.push(token.ordered);
+        listCounters.push(Number(token.start ?? 1));
 
-      const html = items.map((item) => this.listitem(item)).join("");
+        const html = token.items.map((item) => this.listitem(item)).join("");
 
-      listOrderedStack.pop();
-      listCounters.pop();
+        listOrderedStack.pop();
+        listCounters.pop();
 
-      return styledContent(ordered ? "ol" : "ul", html);
+        return styledContent(token.ordered ? "ol" : "ul", html);
+      }
+      const body = String(arg ?? "");
+      return styledContent(ordered ? "ol" : "ul", body);
     },
 
-    listitem(token: Tokens.ListItem) {
+    listitem(token: any) {
+      if (typeof token === "string") {
+        return styledContent("listitem", token, "li");
+      }
       const ordered = listOrderedStack[listOrderedStack.length - 1];
       const idx = listCounters[listCounters.length - 1]!;
 
       listCounters[listCounters.length - 1] = idx + 1;
 
       const prefix = ordered ? `${idx}. ` : "• ";
-
-      let content: string;
-      try {
-        content = this.parser.parseInline(token.tokens);
-      } catch {
-        content = this.parser
-          .parse(token.tokens)
-          .replace(/^<p(?:\s[^>]*)?>([\s\S]*?)<\/p>/, "$1");
-      }
+      const content = token?.tokens
+        ? marked.Parser.parseInline(token.tokens)
+        : escapeHtml(token?.text ?? "");
 
       return styledContent("listitem", `${prefix}${content}`, "li");
     },
 
-    image({ href, title, text }: Tokens.Image): string {
-      const newText = opts.legend ? transform(opts.legend, text, title) : "";
+    image(hrefOrToken: any, title?: string, text?: string): string {
+      const href = hrefOrToken && typeof hrefOrToken === "object" ? hrefOrToken.href : hrefOrToken;
+      const imgTitle = hrefOrToken && typeof hrefOrToken === "object" ? hrefOrToken.title : title;
+      const imgText = hrefOrToken && typeof hrefOrToken === "object" ? hrefOrToken.text : text;
+      const newText = opts.legend ? transform(opts.legend, imgText ?? "", imgTitle) : "";
       const subText = newText ? styledContent("figcaption", newText) : "";
-      const titleAttr = title ? ` title="${title}"` : "";
-      return `<figure><img src="${href}"${titleAttr} alt="${text}"/>${subText}</figure>`;
+      const titleAttr = imgTitle ? ` title="${imgTitle}"` : "";
+      return `<figure><img src="${href}"${titleAttr} alt="${imgText ?? ""}"/>${subText}</figure>`;
     },
 
-    link({ href, title, text, tokens }: Tokens.Link): string {
-      const parsedText = this.parser.parseInline(tokens);
+    link(hrefOrToken: any, title?: string, text?: string): string {
+      const href = hrefOrToken && typeof hrefOrToken === "object" ? hrefOrToken.href : hrefOrToken;
+      const linkTitle = hrefOrToken && typeof hrefOrToken === "object" ? hrefOrToken.title : title;
+      const linkText = hrefOrToken && typeof hrefOrToken === "object" ? hrefOrToken.text : text;
+      const tokens = hrefOrToken && typeof hrefOrToken === "object" ? hrefOrToken.tokens : undefined;
+      const parsedText = tokens ? marked.Parser.parseInline(tokens) : escapeHtml(linkText ?? "");
       if (/^https?:\/\/mp\.weixin\.qq\.com/.test(href)) {
-        return `<a href="${href}" title="${title || text}">${parsedText}</a>`;
+        return `<a href="${href}" title="${linkTitle || linkText}">${parsedText}</a>`;
       }
-      if (href === text) {
+      if (href === linkText) {
         return parsedText;
       }
       if (opts.citeStatus) {
-        const ref = addFootnote(title || text, href);
-        return `<a href="${href}" title="${title || text}">${parsedText}<sup>[${ref}]</sup></a>`;
+        const ref = addFootnote(linkTitle || linkText || href, href);
+        return `<a href="${href}" title="${linkTitle || linkText}">${parsedText}<sup>[${ref}]</sup></a>`;
       }
-      return `<a href="${href}" title="${title || text}">${parsedText}</a>`;
+      return `<a href="${href}" title="${linkTitle || linkText}">${parsedText}</a>`;
     },
 
-    strong({ tokens }: Tokens.Strong): string {
-      return styledContent("strong", this.parser.parseInline(tokens));
+    strong(arg: any): string {
+      if (typeof arg === "string") {
+        return styledContent("strong", arg);
+      }
+      const tokens = arg?.tokens;
+      return styledContent("strong", tokens ? marked.Parser.parseInline(tokens) : "");
     },
 
-    em({ tokens }: Tokens.Em): string {
-      return styledContent("em", this.parser.parseInline(tokens));
+    em(arg: any): string {
+      if (typeof arg === "string") {
+        return styledContent("em", arg);
+      }
+      const tokens = arg?.tokens;
+      return styledContent("em", tokens ? marked.Parser.parseInline(tokens) : "");
     },
 
-    table({ header, rows }: Tokens.Table): string {
-      const headerRow = header
-        .map((cell) => {
-          const text = this.parser.parseInline(cell.tokens);
-          return styledContent("th", text);
-        })
-        .join("");
-      const body = rows
-        .map((row) => {
-          const rowContent = row.map((cell) => this.tablecell(cell)).join("");
-          return styledContent("tr", rowContent);
-        })
-        .join("");
-      return `
+    table(arg: any, body?: any): string {
+      if (arg && typeof arg === "object" && "header" in arg) {
+        const token = arg as Tokens.Table;
+        const headerRow = token.header
+          .map((cell) => {
+            const text = cell.tokens ? marked.Parser.parseInline(cell.tokens) : escapeHtml(cell.text ?? "");
+            return styledContent("th", text);
+          })
+          .join("");
+        const tbody = token.rows
+          .map((row) => {
+            const rowContent = row.map((cell) => this.tablecell(cell)).join("");
+            return styledContent("tr", rowContent);
+          })
+          .join("");
+        return `
         <section style="max-width: 100%; overflow: auto">
           <table class="preview-table">
             <thead>${headerRow}</thead>
-            <tbody>${body}</tbody>
+            <tbody>${tbody}</tbody>
+          </table>
+        </section>
+      `;
+      }
+      const header = String(arg ?? "");
+      const tbody = String(body ?? "");
+      return `
+        <section style="max-width: 100%; overflow: auto">
+          <table class="preview-table">
+            <thead>${header}</thead>
+            <tbody>${tbody}</tbody>
           </table>
         </section>
       `;
     },
 
-    tablecell(token: Tokens.TableCell): string {
-      const text = this.parser.parseInline(token.tokens);
+    tablecell(token: any): string {
+      if (typeof token === "string") {
+        return styledContent("td", token);
+      }
+      const text = token?.tokens
+        ? marked.Parser.parseInline(token.tokens)
+        : escapeHtml(token?.text ?? "");
       return styledContent("td", text);
     },
 
@@ -627,7 +803,7 @@ function main(): void {
   const css = buildCss(baseCss, themeCss);
   const markdown = fs.readFileSync(inputPath, "utf-8");
 
-  const renderer = initRenderer({});
+  const renderer = initRenderer({ themeName: options.theme });
   const { html: baseHtml, readingTime: readingTimeResult } = renderMarkdown(
     markdown,
     renderer

@@ -8,6 +8,31 @@ import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 
+
+function loadEnvFile(dotenvPath: string): void {
+  if (!fs.existsSync(dotenvPath)) return;
+  const lines = fs.readFileSync(dotenvPath, 'utf-8').split('\n');
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#') || !line.includes('=')) continue;
+    const [key, ...rest] = line.split('=');
+    const value = rest.join('=').trim().replace(/^['\"]|['\"]$/g, '');
+    const k = key.trim();
+    if (k && !process.env[k]) process.env[k] = value;
+  }
+}
+
+
+
+function loadProxyEnv(): void {
+  const scriptDir = path.dirname(new URL(import.meta.url).pathname);
+  const skillDir = path.resolve(scriptDir, '..');
+  const proxyPath = path.join(skillDir, '.proxy.env');
+  loadEnvFile(proxyPath);
+}
+
+loadProxyEnv();
+
 interface ImageInfo {
   placeholder: string;
   localPath: string;
@@ -130,7 +155,10 @@ async function parseMarkdownForWechat(
     if (h1Match) title = h1Match[1]!;
   }
 
-  const author = frontmatter.author ?? '';
+  // 默认作者（可被 frontmatter 覆盖）
+  const defaultAuthor = 'Aki聊AI';
+
+  const author = frontmatter.author ?? defaultAuthor;
   let summary = frontmatter.summary ?? frontmatter.description ?? '';
 
   if (!summary) {
@@ -161,7 +189,7 @@ async function parseMarkdownForWechat(
   let imageCounter = 0;
 
   const modifiedBody = body.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, src) => {
-    const placeholder = `[[IMAGE_PLACEHOLDER_${++imageCounter}]]`;
+    const placeholder = `IMAGE_PLACEHOLDER_${++imageCounter}`;
     images.push({ src, placeholder });
     return placeholder;
   });
@@ -175,7 +203,8 @@ async function parseMarkdownForWechat(
   const renderScript = path.join(scriptDir, 'md', 'render.ts');
 
   console.error(`[md-to-wechat] Rendering markdown with theme: ${theme}`);
-  const result = spawnSync('npx', ['-y', 'bun', renderScript, tempMdPath, '--theme', theme], {
+  const bunBin = process.env.BUN_BIN || process.env.BUN_PATH || 'bun';
+  const result = spawnSync(bunBin, [renderScript, tempMdPath, '--theme', theme], {
     stdio: ['inherit', 'pipe', 'pipe'],
     cwd: baseDir,
   });
@@ -217,7 +246,7 @@ Usage:
 
 Options:
   --title <title>     Override title
-  --theme <name>      Theme name (default, grace, simple)
+  --theme <name>      Theme name (default, grace, simple, huasheng)
   --help              Show this help
 
 Output JSON format:
@@ -226,7 +255,7 @@ Output JSON format:
   "htmlPath": "/tmp/wechat-article-images/temp-article.html",
   "contentImages": [
     {
-      "placeholder": "[[IMAGE_PLACEHOLDER_1]]",
+      "placeholder": "IMAGE_PLACEHOLDER_1",
       "localPath": "/tmp/wechat-article-images/img.png",
       "originalPath": "imgs/image.png"
     }

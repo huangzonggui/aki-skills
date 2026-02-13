@@ -48,28 +48,35 @@ Use the following style guide (copied verbatim):
 
 # Output Sections
 
-## 结构（三部分）
 
-### 1. 开头概览
+
+## 1. 【概览，标题写以下内容相关的power point】
 
 * 字数控制在60字内。
-* **逻辑**：点出博主/内容的含金量（团队/资源/口碑）+ 为什么值得现在的我收藏（没时间看原片/备查）。
-* **口吻**：自然、松弛。不要每次都用一样的句式。
-* **标题灵活**：根据内容定，不要固定用"概览"这种模板词
 
-### 2. 关键点列表
+* **逻辑**：点出博主/内容的含金量（团队/资源/口碑）+ 为什么值得现在的我收藏（没时间看原片/备查）。
+
+* **口吻**：自然、松弛。不要每次都用一样的句式。
+
+
+
+## 2. 【干货列表，标题写以下内容相关的power point】
 
 * 用列表形式，但不要太工整。
+
 * 提炼核心：工具名/专业名词、操作逻辑、或者反直觉的观点。
+
 * **格式建议**：关键词 + 空格/破折号 + 核心结论（一句话讲完）。
-* **标题灵活**：用"关键点"、"核心观点"、"要点"、"重点"等自然词汇，不要用【干货列表】这种模板
 
-### 3. 个人感悟
 
-* **这是二创的核心**。结合内容聊聊你的"观后感"。
+
+## 3. 【感悟，标题写以下内容相关的power point】
+
+* **这是二创的核心**。结合内容聊聊你的“观后感”。
+
 * 例如：这东西适合谁？门槛在哪？是不是智商税？
-* 用词要真诚，可以说"我觉得..."，或者"同意...但..."。
-* **标题灵活**：用"感悟"、"想法"、"思考"、"我的看法"等自然词汇
+
+* 用词要真诚，可以说“我觉得...”，或者“同意...但...”。
 
 
 
@@ -182,7 +189,14 @@ Next Step for You:
 
 ## Writing constraint
 
-The style guide above is the full writing prompt. Do not add or omit any writing rules beyond it. Use its section titles and requirements exactly as written.
+The style guide above is the full writing prompt. Do not add or omit any writing rules beyond it.
+
+Interpretation for final output:
+- Follow the intent of the three sections, but do not copy section title templates literally.
+- Do not output boxed/template headings such as `## 1. 【概览...】`, `## 2. 【干货列表...】`, `## 3. 【感悟...】`.
+- Rewrite headings into natural, publish-ready Chinese based on the topic (for example: `我为什么重视它`, `它强在哪`, `最后`).
+- Avoid overused gimmick headings like `One more thing`.
+- Default to direct-to-publish prose; do not expose prompt scaffolding in final text.
 
 ## Coverage & length policy
 
@@ -191,10 +205,10 @@ This is process guidance, not a style rule:
 - Match length to article density: cover all major points; do not over-compress.
 - If the article is a list (e.g., Top N), include every item.
 - Each bullet should include at least one concrete detail (number, name, time, place, or specific claim).
-- For long articles, aim for a denser list (8–12 bullets) and a longer 感悟 (at least 3 sentences).
-- 概览用 2–3 句完成可信度+当下价值+方向感，不要一句带过。
-- 干货列表每条用 1–2 句，包含结论+影响/代价/趋势走向。
-- 感悟里至少有 1 个“意外点/反常识”，保持真话语气但不编造。
+- For long articles, aim for a denser list (8–12 bullets) and a longer closing section (at least 3 sentences).
+- Opening section: use 2–3 sentences to establish credibility + current value + direction; do not collapse it into one sentence.
+- Key-point list: each bullet uses 1–2 sentences with conclusion + impact/cost/trend.
+- Closing section should include at least one unexpected/anti-common-sense point, in an honest voice without fabricating facts.
 
 ## 去AI味处理
 
@@ -210,7 +224,8 @@ Example:
 
 `/path/to/1.md` → `/path/to/1-笔记.md`
 
-If the target file already exists, append `-v2`, `-v3`, etc.
+If the target file already exists, overwrite it by default to keep a single publishable version.
+Only create `-v2`, `-v3`, etc. when the user explicitly asks for multiple versions.
 
 ## Workflow
 

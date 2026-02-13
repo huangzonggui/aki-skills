@@ -1,6 +1,6 @@
 ---
 name: aki-context-to-html
-description: Convert article/text to styled HTML with AI-powered smart formatting. Uses GLM/OpenAI compatible APIs. Supports 3:4/3:5 PNG export with block-level slicing. Use when asked to create article HTML, social media long images, or content beautifier.
+description: Convert article/text to styled HTML with AI-powered smart formatting. Uses Comfly OpenAI-compatible Chat Completions (Gemini 3 Pro Preview Thinking by default). Supports 3:4/3:5 PNG export with block-level slicing. Use when asked to create article HTML, social media long images, or content beautifier.
 ---
 
 # Aki Context to HTML
@@ -10,8 +10,8 @@ Convert article/text to styled HTML with AI-powered smart formatting and export 
 ## Quick Start
 
 ```bash
-# ONE-TIME SETUP: Create your API key config
-echo "API_KEY=your-api-key-here" > ~/.cloud-code-api-key
+# ONE-TIME SETUP: Set your Comfly API key
+export COMFLY_API_KEY="your-api-key-here"
 
 # Generate HTML from markdown
 npx -y bun ${SKILL_DIR}/scripts/generate-html.ts input.md
@@ -21,9 +21,8 @@ npx -y bun ${SKILL_DIR}/scripts/generate-html.ts input.md --output ./output/arti
 ```
 
 **Auto-Detection**: The skill automatically detects:
-- `~/.cloud-code-api-key` (your API config file)
-- `ANTHROPIC_BASE_URL` and `ANTHROPIC_MODEL` from your IDE environment
-- Falls back to environment variables if needed
+- `COMFLY_API_KEY`, `COMFLY_API_BASE_URL`, `COMFLY_CHAT_MODEL`
+- `~/.config/comfly/config` (COMFLY_API_KEY / COMFLY_API_URL / COMFLY_CHAT_MODEL)
 
 > **Note**: `${SKILL_DIR}` represents this skill's installation directory. Agent replaces with actual path at runtime.
 
@@ -31,9 +30,9 @@ npx -y bun ${SKILL_DIR}/scripts/generate-html.ts input.md --output ./output/arti
 
 | Feature | Description |
 |---------|-------------|
-| AI Smart Formatting | Uses LLM (GLM by default) to analyze content and apply semantic HTML |
+| AI Smart Formatting | Uses Gemini 3 Pro Preview Thinking via Comfly to analyze content and apply semantic HTML |
 | Multiple Highlight Styles | `<mark>` (yellow), `<em>` (red), `<strong>` (bold), `<blockquote>` (blue border) |
-| Flexible API Support | GLM, OpenAI, or any OpenAI-compatible API |
+| Flexible API Support | Comfly Chat Completions (OpenAI-compatible) |
 | Block-Level Slicing | Splits by HTML elements, not pixels - no cut text lines |
 | Modern UI Layout | Dark control panel + pure white content area |
 | Progress Tracking | Shows export progress with toast notifications |
@@ -71,29 +70,28 @@ npx -y bun ${SKILL_DIR}/scripts/generate-html.ts input.md --output ./output/arti
 
 ## API Configuration
 
-### Environment Variables
+### Environment Variables (Comfly)
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `CLOUD_CODE_API_KEY` | API key (GLM/OpenAI) | **Required** |
-| `CLOUD_CODE_API_URL` | API endpoint | GLM API |
-| `CLOUD_CODE_MODEL` | Model name | `glm-4-flash` |
+| `COMFLY_API_KEY` | Comfly API key | **Required** |
+| `COMFLY_API_BASE_URL` | Comfly base URL | `https://ai.comfly.chat` |
+| `COMFLY_API_URL` | Full chat completions URL | `https://ai.comfly.chat/v1/chat/completions` |
+| `COMFLY_CHAT_MODEL` | Model name | `gemini-3-pro-preview-thinking-*` |
+| `COMFLY_MODEL` | Alias for `COMFLY_CHAT_MODEL` | `gemini-3-pro-preview-thinking-*` |
 
-### Alternative Variables (for compatibility)
+### Local Config File (Optional)
 
 ```
-GLM_API_KEY, OPENAI_API_KEY, API_KEY
-GLM_API_URL, OPENAI_API_URL
-GLM_MODEL, MODEL
+~/.config/comfly/config
+COMFLY_API_KEY=your-api-key
+COMFLY_API_BASE_URL=https://ai.comfly.chat
+COMFLY_CHAT_MODEL=gpt-4o-mini
 ```
 
-### Supported APIs
+### Supported API
 
-| API | API URL | Model |
-|-----|---------|-------|
-| **GLM (智谱)** | `https://open.bigmodel.cn/api/paas/v4/chat/completions` | `glm-4-flash` |
-| **OpenAI** | `https://api.openai.com/v1/chat/completions` | `gpt-4o-mini` |
-| **DeepSeek** | `https://api.deepseek.com/v1/chat/completions` | `deepseek-chat` |
+- **Comfly Chat Completions (OpenAI-compatible)**: `https://ai.comfly.chat/v1/chat/completions`
 
 ## Options
 
@@ -104,9 +102,9 @@ GLM_MODEL, MODEL
 | `--ratio <ratio>` | Aspect ratio: `3:4` or `3:5` | `3:4` |
 | `--width <px>` | Target width in pixels | `600` |
 | `--title <text>` | Override article title | From frontmatter/H1 |
-| `--api-url <url>` | Override API URL | GLM API |
+| `--api-url <url>` | Override API URL | Comfly chat completions |
 | `--api-key <key>` | Override API key | From env |
-| `--model <name>` | Override model name | `glm-4-flash` |
+| `--model <name>` | Override model name | `gemini-3-pro-preview-thinking-*` |
 
 ### Output Dimensions
 
@@ -139,7 +137,7 @@ Block-level splitting:
 
 ## Troubleshooting
 
-- **API Key not found**: Set `CLOUD_CODE_API_KEY` environment variable
+- **API Key not found**: Set `COMFLY_API_KEY` environment variable
 - **API request failed**: Check API key and URL are correct
 - **Text looks compressed**: Should be fixed - width is 600px by default
 - **Background not white**: Should be fixed - pure white background is default

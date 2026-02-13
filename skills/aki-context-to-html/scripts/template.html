@@ -149,7 +149,9 @@
             color: #1a1a1a;
         }
 
-        .section-title {
+        .section-title,
+        .content-area h2,
+        .content-area > h2 {
             font-family: 'Noto Serif SC', serif;
             font-size: 32px;
             font-weight: 700;
@@ -161,21 +163,41 @@
             line-height: 1.2;
         }
 
-        h3 {
-            font-size: 24px;
+        /* Content area h3 - higher specificity */
+        .content-area h3,
+        .content-area > h3 {
+            font-size: 30px !important;
             font-weight: 700;
             color: #2c3e50;
-            margin-top: 36px;
-            margin-bottom: 18px;
+            margin-top: 40px;
+            margin-bottom: 24px;
+            line-height: 1.4;
+        }
+
+        /* Fallback for general h3 */
+        h3:not(.control-panel h3) {
+            font-size: 30px;
+            font-weight: 700;
+            color: #2c3e50;
+            margin-top: 40px;
+            margin-bottom: 24px;
+            line-height: 1.4;
         }
 
         p {
             font-size: 20px;
-            line-height: 1.8;
+            line-height: 2.0;
             color: #333;
             margin-top: 0;
-            margin-bottom: 48px;
+            margin-bottom: 56px;
             text-align: justify;
+        }
+
+        /* br tags should add spacing between paragraphs */
+        br {
+            display: block;
+            content: '';
+            margin-top: 8px;
         }
 
         /* Inline styles */
@@ -198,7 +220,10 @@
             font-weight: bold;
             border-bottom: 3px solid #ff9800;
             border-radius: 4px;
-            padding: 2px 8px;
+            padding: 4px 10px;
+            margin: 0 4px;
+            line-height: 1.8;
+            display: inline-block;
         }
 
         .highlight-pink {
@@ -255,10 +280,11 @@
         /* Blockquote */
         blockquote {
             border-left: 8px solid #4a9eff;
-            padding: 10px 0 10px 30px;
+            padding: 16px 0 16px 32px;
             font-style: italic;
-            margin: 40px 0;
-            font-size: 24px;
+            margin: 40px 0 48px 0;
+            font-size: 26px;
+            line-height: 1.8;
             background: rgba(74, 158, 255, 0.05);
             color: #475569;
         }
@@ -522,6 +548,7 @@
                     top: -9999px;
                     left: -9999px;
                     width: ${CONFIG.targetWidth}px;
+                    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
                 `;
                 document.body.appendChild(renderContainer);
 
@@ -536,6 +563,8 @@
                         min-height: ${targetHeight}px;
                         background: #ffffff;
                         padding: 50px 60px;
+                        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+                        box-sizing: border-box;
                     `;
 
                     // Clone and append elements
@@ -551,13 +580,17 @@
 
                     renderContainer.appendChild(wrapper);
 
-                    // Render to canvas
+                    // Render to canvas with improved settings
                     const canvas = await html2canvas(wrapper, {
                         width: CONFIG.targetWidth,
                         scale: CONFIG.scale,
                         useCORS: true,
                         backgroundColor: '#ffffff',
-                        logging: false
+                        logging: false,
+                        allowTaint: true,
+                        foreignObjectRendering: false,
+                        imageTimeout: 15000,
+                        removeContainer: false
                     });
 
                     // Download

@@ -9,13 +9,15 @@ Centralized style prompt library for reuse across multiple skills.
 
 ## Available Styles
 
-- `handnote`: Concise hand-drawn note style for logical diagrams and summaries
+- `手绘逻辑信息艺术设计师`: Concise hand-drawn note style for logical diagrams and summaries
 - `masterpiece`: Warm, inspirational hand-drawn infographic with 3D lettering
+- `dense-handdrawn-infographic`: High information density, colorful hand-drawn infographic cover
 
 ## Files
 
-- `references/styles/handnote.md`
+- `references/styles/手绘逻辑信息艺术设计师.md`
 - `references/styles/masterpiece.md`
+- `references/styles/dense-handdrawn-infographic.md`
 
 ## Usage
 

@@ -3,12 +3,14 @@
 ## Overview
 
 This skill converts articles/text to styled HTML with smart AI-powered formatting and exports as multiple PNG slices.
+It uses Comfly Chat Completions (Gemini 3 Pro Preview Thinking by default).
 
 ## Quick Start
 
 ```bash
 cd /Users/aki/Development/code/aki-skills/skills/aki-context-to-html
 
+export COMFLY_API_KEY="your-api-key"
 npx -y bun scripts/generate-html.ts /path/to/article.md
 ```
 
@@ -52,6 +54,9 @@ In the browser:
 | `--ratio <ratio>` | Aspect ratio (3:4 or 3:5) | 3:4 |
 | `--width <px>` | Target width in pixels | 1080 |
 | `--title <text>` | Override article title | From frontmatter |
+| `--api-url <url>` | Override API URL | Comfly chat completions |
+| `--api-key <key>` | Override API key | From env |
+| `--model <name>` | Override model name | `gemini-3-pro-preview-thinking-*` |
 
 ### Examples
 
@@ -141,6 +146,11 @@ If you still see issues:
 1. Check browser console for errors
 2. Ensure `html2canvas` is loaded (check network tab)
 3. Try reducing image width: `--width 900`
+
+### API errors
+
+- Set `COMFLY_API_KEY` in your environment
+- Optional: set `COMFLY_API_BASE_URL` if you use a custom Comfly gateway
 
 ### Too many/few slices
 

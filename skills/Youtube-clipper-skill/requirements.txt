@@ -1,0 +1,4 @@
+yt-dlp
+pysrt
+python-dotenv
+curl_cffi

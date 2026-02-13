@@ -229,36 +229,48 @@ export async function getGeminiCookieMapViaChrome(options?: {
   const pollIntervalMs = options?.pollIntervalMs ?? 2_000;
   const userDataDir = options?.userDataDir ?? resolveGeminiWebChromeProfileDir();
 
-  const chromePath = options?.chromePath ?? findChromeExecutable();
-  if (!chromePath) {
-    throw new Error(
-      'Unable to locate a Chrome/Chromium executable. Install Google Chrome or set GEMINI_WEB_CHROME_PATH.',
+  const debugPortOverride = process.env.GEMINI_WEB_DEBUG_PORT?.trim();
+  const debugPort = debugPortOverride ? Number(debugPortOverride) : null;
+  const connectTimeoutOverride = process.env.GEMINI_WEB_CONNECT_TIMEOUT_MS?.trim();
+  const connectTimeoutMs = connectTimeoutOverride ? Number(connectTimeoutOverride) : debugConnectTimeoutMs;
+  const attachOnly = process.env.GEMINI_WEB_ATTACH_ONLY === '1';
+
+  let chrome: ReturnType<typeof spawn> | null = null;
+  let port = debugPort ?? null;
+
+  if (!port) {
+    const chromePath = options?.chromePath ?? findChromeExecutable();
+    if (!chromePath) {
+      throw new Error(
+        'Unable to locate a Chrome/Chromium executable. Install Google Chrome or set GEMINI_WEB_CHROME_PATH.',
+      );
+    }
+
+    await mkdir(userDataDir, { recursive: true });
+    port = await getFreePort();
+    log?.(`[gemini-web] Launching Chrome for cookie sync (profile: ${userDataDir})`);
+
+    chrome = spawn(
+      chromePath,
+      [
+        `--remote-debugging-port=${port}`,
+        `--user-data-dir=${userDataDir}`,
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-blink-features=AutomationControlled',
+        '--start-maximized',
+        GEMINI_URL,
+      ],
+      { stdio: 'ignore' },
     );
+  } else {
+    log?.(`[gemini-web] Using existing Chrome debugging port ${port}`);
   }
-
-  await mkdir(userDataDir, { recursive: true });
-
-  const port = await getFreePort();
-  log?.(`[gemini-web] Launching Chrome for cookie sync (profile: ${userDataDir})`);
-
-  const chrome = spawn(
-    chromePath,
-    [
-      `--remote-debugging-port=${port}`,
-      `--user-data-dir=${userDataDir}`,
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--disable-blink-features=AutomationControlled',
-      '--start-maximized',
-      GEMINI_URL,
-    ],
-    { stdio: 'ignore' },
-  );
 
   let cdp: CdpConnection | null = null;
   try {
-    const { webSocketDebuggerUrl } = await waitForChromeDebugPort(port, debugConnectTimeoutMs);
-    cdp = await CdpConnection.connect(webSocketDebuggerUrl, debugConnectTimeoutMs);
+    const { webSocketDebuggerUrl } = await waitForChromeDebugPort(port, connectTimeoutMs);
+    cdp = await CdpConnection.connect(webSocketDebuggerUrl, connectTimeoutMs);
 
     const { targetId } = await cdp.send<{ targetId: string }>('Target.createTarget', { url: GEMINI_URL });
     const { sessionId } = await cdp.send<{ sessionId: string }>('Target.attachToTarget', {
@@ -314,27 +326,52 @@ export async function getGeminiCookieMapViaChrome(options?: {
   } finally {
     if (cdp) {
       try {
-        await cdp.send('Browser.close', {}, { timeoutMs: 5_000 });
+        if (!attachOnly) {
+          await cdp.send('Browser.close', {}, { timeoutMs: 5_000 });
+        }
       } catch {
         // ignore
       }
       cdp.close();
     }
 
-    const killTimer = setTimeout(() => {
-      if (!chrome.killed) {
-        try {
-          chrome.kill('SIGKILL');
-        } catch {
-          // ignore
+    if (chrome && !attachOnly) {
+      const killTimer = setTimeout(() => {
+        if (!chrome.killed) {
+          try {
+            chrome.kill('SIGKILL');
+          } catch {
+            // ignore
+          }
         }
+      }, 2_000);
+      killTimer.unref?.();
+      try {
+        chrome.kill('SIGTERM');
+      } catch {
+        // ignore
       }
-    }, 2_000);
-    killTimer.unref?.();
-    try {
-      chrome.kill('SIGTERM');
-    } catch {
-      // ignore
+    } else if (chrome) {
+      const killTimer = setTimeout(() => {
+        if (!chrome.killed) {
+          try {
+            chrome.kill('SIGKILL');
+          } catch {
+            // ignore
+          }
+        }
+      }, 2_000);
+      killTimer.unref?.();
+      try {
+        chrome.kill('SIGTERM');
+      } catch {
+        // ignore
+      }
+    }
+    if (!chrome) {
+      // Attach-only mode: leave browser running.
+    } else if (attachOnly) {
+      // already handled above
     }
   }
 }

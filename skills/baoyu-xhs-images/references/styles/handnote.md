@@ -2,7 +2,7 @@
 
 Minimal hand-drawn note, logical and clean
 
-Source of truth: `skills/aki-style-library/references/styles/handnote.md`
+Source of truth: `skills/aki-style-library/references/styles/手绘逻辑信息艺术设计师.md`
 
 ## Color Palette
 

@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+VENV_DIR="${YOUTUBE_CLIPPER_VENV:-${ROOT_DIR}/.venv}"
+PYTHON_BIN="${VENV_DIR}/bin/python3"
+PIP_BIN="${VENV_DIR}/bin/pip"
+REQ_FILE="${ROOT_DIR}/requirements.txt"
+REQ_HASH_FILE="${VENV_DIR}/.requirements.sha256"
+
+ensure_venv() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "ERROR: python3 not found. Please install Python 3.8+."
+    exit 1
+  fi
+
+  if [[ ! -x "${PYTHON_BIN}" ]]; then
+    echo "Creating venv at ${VENV_DIR}"
+    python3 -m venv "${VENV_DIR}"
+    "${PIP_BIN}" install --upgrade pip
+  fi
+
+  if [[ -f "${REQ_FILE}" ]]; then
+    if command -v shasum >/dev/null 2>&1; then
+      local req_hash
+      req_hash="$(shasum -a 256 "${REQ_FILE}" | awk '{print $1}')"
+      if [[ ! -f "${REQ_HASH_FILE}" || "$(cat "${REQ_HASH_FILE}")" != "${req_hash}" ]]; then
+        echo "Installing requirements..."
+        "${PIP_BIN}" install -r "${REQ_FILE}"
+        echo "${req_hash}" > "${REQ_HASH_FILE}"
+      fi
+    else
+      echo "Installing requirements..."
+      "${PIP_BIN}" install -r "${REQ_FILE}"
+    fi
+  fi
+}
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: $(basename "$0") <script.py> [args...]"
+  echo "Example: $(basename "$0") scripts/download_video.py <youtube_url>"
+  exit 1
+fi
+
+ensure_venv
+exec "${PYTHON_BIN}" "$@"

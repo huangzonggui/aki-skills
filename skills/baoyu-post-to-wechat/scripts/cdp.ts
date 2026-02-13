@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import net from 'node:net';
@@ -89,6 +89,24 @@ async function waitForChromeDebugPort(port: number, timeoutMs: number): Promise<
   throw new Error(`Chrome debug port not ready: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
 }
 
+function findExistingChromeDebugPort(profileDir: string): number | null {
+  if (process.platform === 'win32') return null;
+  const resolvedProfile = path.resolve(profileDir);
+  const result = spawnSync('ps', ['aux'], { encoding: 'utf8' });
+  if (result.status !== 0 || !result.stdout) return null;
+
+  const lines = result.stdout.split('\n');
+  for (const line of lines) {
+    if (!line.includes('--remote-debugging-port=')) continue;
+    if (!line.includes('--user-data-dir=')) continue;
+    if (!line.includes(resolvedProfile)) continue;
+    const match = line.match(/--remote-debugging-port=(\d+)/);
+    if (match) return Number(match[1]);
+  }
+
+  return null;
+}
+
 export class CdpConnection {
   private ws: WebSocket;
   private nextId = 0;
@@ -171,12 +189,20 @@ export interface ChromeSession {
   targetId: string;
 }
 
-export async function launchChrome(url: string, profileDir?: string): Promise<{ cdp: CdpConnection; chrome: ReturnType<typeof spawn> }> {
+export async function launchChrome(url: string, profileDir?: string): Promise<{ cdp: CdpConnection; chrome?: ReturnType<typeof spawn> }> {
   const chromePath = findChromeExecutable();
   if (!chromePath) throw new Error('Chrome not found. Set WECHAT_BROWSER_CHROME_PATH env var.');
 
   const profile = profileDir ?? getDefaultProfileDir();
   await mkdir(profile, { recursive: true });
+
+  const existingPort = findExistingChromeDebugPort(profile);
+  if (existingPort) {
+    console.log(`[cdp] Reusing Chrome (profile: ${profile}, port: ${existingPort})`);
+    const wsUrl = await waitForChromeDebugPort(existingPort, 10_000);
+    const cdp = await CdpConnection.connect(wsUrl, 30_000);
+    return { cdp };
+  }
 
   const port = await getFreePort();
   console.log(`[cdp] Launching Chrome (profile: ${profile})`);

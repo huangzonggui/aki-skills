@@ -5,6 +5,19 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SKILL_DIR = path.resolve(__dirname, '..');
+const COMFLY_DEFAULT_BASE_URL = 'https://ai.comfly.chat';
+const COMFLY_CHAT_PATH = '/v1/chat/completions';
+const HOME_DIR = process.env.HOME || process.env.USERPROFILE || '';
+const COMFLY_CONFIG_PATH = path.join(
+  HOME_DIR,
+  '.config',
+  'comfly',
+  'config',
+);
+const COMFLY_CONFIG_LEGACY_PATHS = [
+  path.join(HOME_DIR, '.config', 'providers', 'comfly.env'),
+  path.join(HOME_DIR, '.config', 'aki', 'providers', 'comfly.env'),
+];
 
 interface Options {
   output?: string;
@@ -21,77 +34,99 @@ interface ParsedContent {
   content: string;
 }
 
+function normalizeChatUrl(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  if (trimmed.includes(COMFLY_CHAT_PATH)) {
+    return trimmed;
+  }
+  const base = trimmed.replace(/\/+$/, '');
+  if (base.endsWith('/v1')) {
+    return base + '/chat/completions';
+  }
+  return base + COMFLY_CHAT_PATH;
+}
+
+function isComflyUrl(url: string): boolean {
+  return /comfly/i.test(url);
+}
+
+function parseEnvLikeFile(filePath: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!filePath || !fs.existsSync(filePath)) return out;
+
+  const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eqIdx = line.indexOf('=');
+    if (eqIdx <= 0) continue;
+    const key = line.slice(0, eqIdx).trim();
+    const value = line.slice(eqIdx + 1).trim().replace(/^['"]|['"]$/g, '');
+    if (key && !(key in out)) out[key] = value;
+  }
+
+  return out;
+}
+
+function loadComflyConfig(): Record<string, string> {
+  let merged: Record<string, string> = {};
+  for (const p of COMFLY_CONFIG_LEGACY_PATHS) {
+    merged = { ...merged, ...parseEnvLikeFile(p) };
+  }
+  merged = { ...merged, ...parseEnvLikeFile(COMFLY_CONFIG_PATH) };
+  return merged;
+}
+
 // Get API configuration
 function getApiConfig(options?: Options): { apiUrl: string; apiKey: string; model: string } {
-  // Try to read from ~/.cloud-code-api-key file
-  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-  const apiKeyFile = path.join(homeDir, '.cloud-code-api-key');
+  const providerConfig = loadComflyConfig();
+  const fileApiKey = providerConfig.COMFLY_API_KEY || providerConfig.API_KEY || '';
+  const fileApiUrl = providerConfig.COMFLY_API_URL || providerConfig.API_URL || '';
+  const fileApiBaseUrl = providerConfig.COMFLY_API_BASE_URL || '';
+  const fileModel = providerConfig.COMFLY_CHAT_MODEL
+    || providerConfig.COMFLY_MODEL
+    || providerConfig.MODEL
+    || '';
 
-  let apiKey = '';
-  let apiUrl = '';
-  let model = '';
+  let apiKey = options?.apiKey ?? '';
+  let apiUrl = options?.apiUrl ?? '';
+  let model = options?.model ?? '';
 
-  if (fs.existsSync(apiKeyFile)) {
-    const content = fs.readFileSync(apiKeyFile, 'utf-8');
-    const lines = content.split('\n');
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith('API_KEY=')) {
-        apiKey = trimmed.split('=')[1]?.trim() || '';
-      } else if (trimmed.startsWith('API_URL=')) {
-        apiUrl = trimmed.split('=')[1]?.trim() || '';
-      } else if (trimmed.startsWith('MODEL=')) {
-        model = trimmed.split('=')[1]?.trim() || '';
-      } else if (trimmed && !trimmed.startsWith('#')) {
-        // If line doesn't have =, treat it as raw API key
-        apiKey = trimmed;
-      }
-    }
-  }
-
-  // Command-line options override config file
-  if (options?.apiUrl) {
-    apiUrl = options.apiUrl;
-  }
-  if (options?.apiKey) {
-    apiKey = options.apiKey;
-  }
-  if (options?.model) {
-    model = options.model;
-  }
-
-  // Fallback to environment variables
+  // Prefer explicit environment variables, then provider file.
   if (!apiKey) {
-    apiKey = process.env.CLOUD_CODE_API_KEY
+    apiKey = process.env.COMFLY_API_KEY
+      || process.env.CLOUD_CODE_API_KEY
       || process.env.GLM_API_KEY
       || process.env.OPENAI_API_KEY
       || process.env.API_KEY
+      || fileApiKey
       || '';
   }
 
-  // Fallback for API URL
   if (!apiUrl) {
-    // Use ANTHROPIC_BASE_URL from env, convert to OpenAI format
-    const anthropicUrl = process.env.ANTHROPIC_BASE_URL;
-    if (anthropicUrl) {
-      // Convert https://open.bigmodel.cn/api/anthropic to OpenAI format
-      apiUrl = anthropicUrl.replace('/anthropic', '/paas/v4/chat/completions');
-    }
-
-    apiUrl = apiUrl || process.env.CLOUD_CODE_API_URL
+    const envApiUrl = process.env.COMFLY_API_URL
+      || process.env.CLOUD_CODE_API_URL
       || process.env.GLM_API_URL
       || process.env.OPENAI_API_URL
-      || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+      || '';
+    const fileUrl = isComflyUrl(fileApiUrl) ? fileApiUrl : '';
+    apiUrl = envApiUrl || fileUrl || '';
   }
 
-  // Fallback for model
+  const baseUrl = process.env.COMFLY_API_BASE_URL || fileApiBaseUrl || '';
+  apiUrl = normalizeChatUrl(apiUrl || baseUrl || COMFLY_DEFAULT_BASE_URL);
+
+  // Model fallback
   if (!model) {
-    model = process.env.CLOUD_CODE_MODEL
+    model = process.env.COMFLY_CHAT_MODEL
+      || process.env.COMFLY_MODEL
+      || fileModel
+      || process.env.CLOUD_CODE_MODEL
       || process.env.GLM_MODEL
-      || process.env.MODEL
       || process.env.ANTHROPIC_MODEL
-      || 'glm-4-flash';
+      || process.env.MODEL
+      || 'gemini-3-pro-preview-thinking-*';
   }
 
   if (!apiKey) {
@@ -100,16 +135,15 @@ API Key not found!
 
 Please set your API key in one of these ways:
 
-1. Create/edit ~/.cloud-code-api-key with your API key:
-   echo "API_KEY=your-api-key-here" > ~/.cloud-code-api-key
+1. Set Comfly API key in environment:
+   export COMFLY_API_KEY="your-api-key"
 
-2. Or set environment variable:
-   export CLOUD_CODE_API_KEY="your-api-key"
+2. Or create/edit ${COMFLY_CONFIG_PATH}:
+   COMFLY_API_KEY=your-api-key-here
+   COMFLY_CHAT_MODEL=gpt-4o-mini
 
 3. Or use command line option:
    --api-key "your-api-key"
-
-Get your GLM API key at: https://open.bigmodel.cn/
 
 Detected configuration:
   - API URL: ${apiUrl}
@@ -141,16 +175,22 @@ function parseMarkdown(filePath: string): ParsedContent {
     body = frontmatterMatch[2]!;
   }
 
-  // Extract title for display (keep original Markdown in body)
-  let title = frontmatter.title ?? '';
-  if (!title) {
-    const h1Match = body.match(/^#\s+(.+)$/m);
-    if (h1Match) title = h1Match[1]!;
+  // Extract title for display (prefer frontmatter, then first H1)
+  let title = (frontmatter.title ?? '').trim();
+  const h1Regex = /^#\s+(.+)$/m;
+  const h1Match = body.match(h1Regex);
+  if (h1Match) {
+    const h1Text = (h1Match[1] ?? '').trim();
+    if (!title) {
+      title = h1Text;
+    }
+    // Remove the first H1 from body to avoid duplicate title rendering
+    body = body.replace(h1Regex, '').trim();
   }
 
-  // Return ORIGINAL Markdown content (don't remove H1 or any formatting)
+  // Return Markdown content (H1 removed if used as title)
   // The LLM will convert Markdown to HTML
-  return { title: title || 'Untitled', content: body.trim() };
+  return { title, content: body.trim() };
 }
 
 function escapeHtml(text: string): string {
@@ -161,7 +201,7 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
-// Call LLM API (GLM/OpenAI compatible) to generate styled HTML
+// Call Comfly Chat Completions (OpenAI compatible) to generate styled HTML
 async function generateStyledHtmlWithLLM(articleText: string, config: { apiUrl: string; apiKey: string; model: string }): Promise<string> {
   // Pre-convert basic Markdown to HTML to ensure consistency
   let preConverted = articleText
@@ -252,6 +292,7 @@ ${preConverted}
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Accept': 'application/json',
         'Authorization': `Bearer ${config.apiKey}`,
       },
       body: JSON.stringify({
@@ -262,6 +303,8 @@ ${preConverted}
             content: prompt,
           },
         ],
+        tools: [],
+        tool_choice: 'none',
         temperature: 0.6,
         top_p: 0.95,
         max_tokens: 8000,
@@ -317,6 +360,11 @@ function cleanAIOutput(html: string): string {
   return cleaned.trim();
 }
 
+// Ensure key structural classes exist even if the model forgets to add them.
+function normalizeHeadingClasses(html: string): string {
+  return html.replace(/<h2(?![^>]*\bclass=)([^>]*)>/gi, '<h2 class="section-title"$1>');
+}
+
 async function generateHtml(
   inputPath: string,
   options: Options = {},
@@ -330,10 +378,16 @@ async function generateHtml(
   console.error(`🤖 Calling ${apiConfig.model} for intelligent styling...`);
 
   // Generate styled HTML with LLM
-  const styledHtml = await generateStyledHtmlWithLLM(parsed.content, apiConfig);
+  const styledHtml = normalizeHeadingClasses(
+    await generateStyledHtmlWithLLM(parsed.content, apiConfig),
+  );
 
   // Override title if provided
-  const title = options.title ?? parsed.title;
+  const displayTitle = (options.title ?? parsed.title ?? '').trim();
+  const hasDisplayTitle = Boolean(displayTitle);
+  const docTitle = hasDisplayTitle
+    ? displayTitle
+    : path.basename(inputPath, path.extname(inputPath));
 
   // Read template
   const templatePath = path.join(SKILL_DIR, 'scripts', 'template.html');
@@ -342,7 +396,7 @@ async function generateHtml(
   // Replace placeholders - use global replace for TITLE
   const titleMarker = '___TITLE_PLACEHOLDER___';
   let html = template.replaceAll('{{TITLE}}', titleMarker);
-  html = html.replaceAll(titleMarker, escapeHtml(title));
+  html = html.replaceAll(titleMarker, escapeHtml(docTitle));
 
   // Replace content and other placeholders
   const width = options.width ?? 600;
@@ -355,12 +409,16 @@ async function generateHtml(
   const targetHeight = ratio === '3:5' ? 1000 : 800;
   html = html.replaceAll('{{TARGET_HEIGHT}}', String(targetHeight));
 
+  if (!hasDisplayTitle) {
+    html = html.replace(/\s*<h1 class="article-title">[\s\S]*?<\/h1>\s*/i, '');
+  }
+
   return html;
 }
 
 function printUsage(): never {
   console.log(`
-Aki Context to HTML - Generate styled HTML with AI (GLM/OpenAI compatible)
+Aki Context to HTML - Generate styled HTML with Comfly Chat Completions
 
 Usage:
   npx -y bun generate-html.ts <input.md> [options]
@@ -370,26 +428,27 @@ Options:
   --ratio <ratio>    Aspect ratio: 3:4 or 3:5 (default: 3:4)
   --width <px>       Target width in pixels (default: 600)
   --title <text>     Override article title
-  --api-url <url>   API URL (default: GLM API)
-  --api-key <key>   API key (or use CLOUD_CODE_API_KEY env var)
-  --model <name>    Model name (default: glm-4-flash)
+  --api-url <url>   API URL (default: Comfly chat completions)
+  --api-key <key>   API key (or use COMFLY_API_KEY env var)
+  --model <name>    Model name (default: gemini-3-pro-preview-thinking-*)
   -h, --help         Show this help
 
 Environment Variables:
-  CLOUD_CODE_API_KEY    API key (supports GLM, OpenAI compatible)
-  CLOUD_CODE_API_URL    API URL (default: GLM API)
-  CLOUD_CODE_MODEL      Model name (default: glm-4-flash)
+  COMFLY_API_KEY         Comfly API key (required)
+  COMFLY_API_BASE_URL    Comfly base URL (default: https://ai.comfly.chat)
+  COMFLY_API_URL         Full Comfly chat completions URL (optional)
+  COMFLY_CHAT_MODEL      Model name (default: gemini-3-pro-preview-thinking-*)
+  COMFLY_MODEL           Alias for COMFLY_CHAT_MODEL
 
-  Alternative variables:
-  GLM_API_KEY, OPENAI_API_KEY, API_KEY
-  GLM_API_URL, OPENAI_API_URL
+Provider Config (user-level):
+  ~/.config/comfly/config
 
 Examples:
   npx -y bun generate-html.ts article.md
   npx -y bun generate-html.ts article.md --output ./output.html
   npx -y bun generate-html.ts article.md --ratio 3:5
 
-Note: This skill uses LLM (GLM by default) to intelligently analyze content
+Note: This skill uses Comfly Chat Completions (Gemini 3 Pro Preview Thinking by default) to intelligently analyze content
 and apply semantic HTML formatting with smart highlights.
 
 Output sizes:
