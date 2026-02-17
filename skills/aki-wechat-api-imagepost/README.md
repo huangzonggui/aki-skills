@@ -16,6 +16,10 @@
 | 文章发布（直传 HTML） | 直接传入 HTML 字符串 | `publish-official-draft.py --mode article --content-html` |
 | 兼容发布 | 生成 markdown 并用 wenyan 发布 | `publish-image-post.sh` |
 
+说明：
+- `imagepost` 默认 `article_type=newspic`
+- `article` 默认 `article_type=news`
+
 ## 2. 官方 API 流程
 
 脚本使用以下官方接口：
@@ -64,6 +68,13 @@ export WECHAT_APP_SECRET=你的AppSecret
 ```bash
 python3 ./scripts/publish-official-draft.py \
   --mode imagepost \
+  --dir "/path/to/images" \
+  --title "你的标题"
+
+# 如需强制按图文消息(news)方式发布，可显式指定：
+python3 ./scripts/publish-official-draft.py \
+  --mode imagepost \
+  --article-type news \
   --dir "/path/to/images" \
   --title "你的标题"
 ```
@@ -120,10 +131,12 @@ python3 ./scripts/publish-official-draft.py \
 | 参数 | 说明 |
 | --- | --- |
 | `--mode imagepost|article` | 发布模式（默认 `imagepost`） |
+| `--article-type news|newspic` | 文章类型；默认 `imagepost=newspic`，`article=news` |
 | `--dir` | 图片目录（`imagepost` 必填） |
 | `--markdown` | Markdown 文件（`article` 三选一） |
 | `--html` | HTML 文件（`article` 三选一） |
 | `--content-html` | HTML 内容字符串（`article` 三选一） |
+| `--text` | `newspic` 模式下的文本内容（可选） |
 | `--title` | 标题（<=64） |
 | `--cover` | 封面图路径（未自动推断时必填） |
 | `--author` | 作者 |
@@ -137,6 +150,10 @@ python3 ./scripts/publish-official-draft.py \
 - `imagepost`：默认用目录第一张图片作为封面。
 - `article`：默认尝试使用正文中第一张本地图片作为封面。
 - 若无法自动推断，必须传 `--cover`。
+
+补充：
+- 当 `article_type=newspic` 时，脚本会按文档要求写入 `image_info.image_list[].image_media_id`（永久素材 ID）。
+- 当 `article_type=news` 时，脚本会写入 `thumb_media_id`。
 
 ## 8. 返回结果
 

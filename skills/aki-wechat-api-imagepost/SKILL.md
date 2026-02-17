@@ -13,6 +13,10 @@ description: 通过官方 API 发布微信公众号草稿（不依赖浏览器�
 2. `article`：Markdown/HTML -> 文章草稿
 3. 兼容模式：`publish-image-post.sh` + wenyan
 
+默认类型：
+- `imagepost` => `article_type=newspic`
+- `article` => `article_type=news`
+
 ## 前置要求
 
 1. Python 3.9+
@@ -42,6 +46,13 @@ WECHAT_TOKEN=你的AppSecret
 ```bash
 python3 ./scripts/publish-official-draft.py \
   --mode imagepost \
+  --dir "/path/to/images" \
+  --title "标题"
+
+# 可覆盖类型
+python3 ./scripts/publish-official-draft.py \
+  --mode imagepost \
+  --article-type news \
   --dir "/path/to/images" \
   --title "标题"
 ```
@@ -77,6 +88,7 @@ python3 ./scripts/publish-official-draft.py \
 - Markdown/HTML 中的本地图片会自动上传并替换为微信 URL
 - `article` 模式会自动尝试提取标题与摘要
 - 封面优先级：`--cover` > 正文第一张本地图 >（无则报错）
+- `newspic` 会按文档写入 `image_info.image_list[].image_media_id`
 
 ## 输出
 

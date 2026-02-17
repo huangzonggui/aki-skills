@@ -233,6 +233,17 @@ def upload_cover_for_thumb(access_token: str, cover_path: Path) -> str:
     return media_id
 
 
+def upload_permanent_image(
+    access_token: str, image_path: Path, cache: Dict[str, str]
+) -> str:
+    key = str(image_path.resolve())
+    if key in cache:
+        return cache[key]
+    media_id = upload_cover_for_thumb(access_token, image_path)
+    cache[key] = media_id
+    return media_id
+
+
 def upload_content_image(
     access_token: str, image_path: Path, cache: Dict[str, str]
 ) -> str:
@@ -251,25 +262,9 @@ def upload_content_image(
 
 def add_draft(
     access_token: str,
-    *,
-    title: str,
-    author: str,
-    digest: str,
-    source_url: str,
-    content_html: str,
-    thumb_media_id: str,
+    article: Dict,
 ) -> Dict:
     url = f"{DRAFT_ADD_URL}?access_token={quote(access_token)}"
-    article = {
-        "title": title,
-        "author": author,
-        "digest": digest,
-        "content": content_html,
-        "content_source_url": source_url,
-        "thumb_media_id": thumb_media_id,
-        "need_open_comment": 0,
-        "only_fans_can_comment": 0,
-    }
     result = http_json(url, {"articles": [article]}, method="POST")
     ensure_wechat_ok(result, "add draft")
     return result
@@ -485,6 +480,19 @@ def parse_args() -> argparse.Namespace:
     # shared article fields
     parser.add_argument("--title", help="Article title (<=64 chars)")
     parser.add_argument("--cover", help="Cover image path (default: first local image)")
+    parser.add_argument(
+        "--article-type",
+        choices=["news", "newspic"],
+        help=(
+            "draft article type. "
+            "Default: imagepost=newspic, article=news"
+        ),
+    )
+    parser.add_argument(
+        "--text",
+        default="",
+        help="text content for newspic image message (optional)",
+    )
     parser.add_argument("--author", default="", help="Author name")
     parser.add_argument("--digest", default="", help="Article digest (<=120 chars)")
     parser.add_argument("--source-url", default="", help="Original source URL")
@@ -519,8 +527,12 @@ def resolve_credentials(args: argparse.Namespace) -> Tuple[str, str]:
 
 
 def run_imagepost_mode(
-    args: argparse.Namespace, access_token: str, cache: Dict[str, str]
-) -> Tuple[str, str, Optional[Path], Optional[str]]:
+    args: argparse.Namespace,
+    access_token: str,
+    url_cache: Dict[str, str],
+    media_cache: Dict[str, str],
+    article_type: str,
+) -> Dict:
     if not args.dir:
         fail("--dir is required in imagepost mode")
     if not args.title:
@@ -537,22 +549,82 @@ def run_imagepost_mode(
     cover_candidate = Path(args.cover).expanduser().resolve() if args.cover else images[0]
     ensure_exists_file(cover_candidate, "cover image")
 
+    title = safe_title(args.title)
+    author = args.author.strip()
+    digest = safe_digest(args.digest)
+    source_url = args.source_url.strip()
+
     print(f"Image count: {len(images)}")
     print(f"Cover image: {cover_candidate}")
+    print(f"Article type: {article_type}")
+
+    if article_type == "newspic":
+        print("Step 2/4: uploading permanent images for image_info...")
+        image_media_ids: List[str] = []
+        for idx, image in enumerate(images, start=1):
+            print(f"  - [{idx}/{len(images)}] {image.name}")
+            media_id = upload_permanent_image(access_token, image, media_cache)
+            image_media_ids.append(media_id)
+
+        text_content = (args.text or digest or title).strip()
+        if not text_content:
+            text_content = title
+
+        article: Dict = {
+            "article_type": "newspic",
+            "title": title,
+            "content": text_content,
+            "image_info": {
+                "image_list": [{"image_media_id": mid} for mid in image_media_ids]
+            },
+            "need_open_comment": 0,
+            "only_fans_can_comment": 0,
+        }
+        if author:
+            article["author"] = author
+        if digest:
+            article["digest"] = digest
+        if source_url:
+            article["content_source_url"] = source_url
+        return article
+
+    # news: keep backward-compatible behavior with HTML content + thumb cover.
     print("Step 2/4: uploading content images...")
     urls: List[str] = []
     for idx, image in enumerate(images, start=1):
         print(f"  - [{idx}/{len(images)}] {image.name}")
-        urls.append(upload_content_image(access_token, image, cache))
+        urls.append(upload_content_image(access_token, image, url_cache))
 
-    title = safe_title(args.title)
+    print("Step 3/4: uploading cover image for thumb_media_id...")
+    thumb_media_id = upload_permanent_image(access_token, cover_candidate, media_cache)
     content_html = build_imagepost_html(title, urls)
-    return title, content_html, cover_candidate, args.digest or None
+    article = {
+        "article_type": "news",
+        "title": title,
+        "content": content_html,
+        "thumb_media_id": thumb_media_id,
+        "need_open_comment": 0,
+        "only_fans_can_comment": 0,
+    }
+    if author:
+        article["author"] = author
+    if digest:
+        article["digest"] = digest
+    if source_url:
+        article["content_source_url"] = source_url
+    return article
 
 
 def run_article_mode(
-    args: argparse.Namespace, access_token: str, cache: Dict[str, str]
-) -> Tuple[str, str, Optional[Path], Optional[str]]:
+    args: argparse.Namespace,
+    access_token: str,
+    url_cache: Dict[str, str],
+    media_cache: Dict[str, str],
+    article_type: str,
+) -> Dict:
+    if article_type != "news":
+        fail("article mode currently supports article_type=news only")
+
     sources = [bool(args.markdown), bool(args.html_file), bool(args.content_html)]
     if sum(sources) != 1:
         fail("article mode requires exactly one of --markdown / --html / --content-html")
@@ -569,7 +641,7 @@ def run_article_mode(
         md_text = md_path.read_text(encoding="utf-8", errors="ignore")
         inferred_digest = extract_markdown_digest(md_text)
         content_html, inferred_title, cover_candidate = render_markdown_to_html_with_upload(
-            md_path, access_token, cache
+            md_path, access_token, url_cache
         )
     elif args.html_file:
         html_path = Path(args.html_file).expanduser().resolve()
@@ -578,7 +650,7 @@ def run_article_mode(
         inferred_title = extract_html_title(html_text)
         inferred_digest = extract_html_digest(html_text)
         content_html, cover_candidate = upload_local_images_in_html(
-            html_text, html_path.parent, access_token, cache
+            html_text, html_path.parent, access_token, url_cache
         )
     else:
         # direct html content
@@ -601,8 +673,28 @@ def run_article_mode(
             "Please provide --cover /path/to/cover.jpg"
         )
 
-    digest = args.digest or inferred_digest
-    return title, content_html, cover_candidate, digest
+    author = args.author.strip()
+    digest = safe_digest(args.digest or inferred_digest)
+    source_url = args.source_url.strip()
+
+    print("Step 3/4: uploading cover image for thumb_media_id...")
+    thumb_media_id = upload_permanent_image(access_token, cover_candidate, media_cache)
+
+    article: Dict = {
+        "article_type": "news",
+        "title": title,
+        "content": content_html,
+        "thumb_media_id": thumb_media_id,
+        "need_open_comment": 0,
+        "only_fans_can_comment": 0,
+    }
+    if author:
+        article["author"] = author
+    if digest:
+        article["digest"] = digest
+    if source_url:
+        article["content_source_url"] = source_url
+    return article
 
 
 def main() -> None:
@@ -611,38 +703,26 @@ def main() -> None:
     appid, secret = resolve_credentials(args)
 
     mode = infer_mode(args)
+    default_article_type = "newspic" if mode == "imagepost" else "news"
+    article_type = args.article_type or default_article_type
     print(f"Mode: {mode}")
 
     print("Step 1/4: fetching stable token...")
     access_token = get_access_token(appid, secret, args.force_refresh_token)
-    cache: Dict[str, str] = {}
+    url_cache: Dict[str, str] = {}
+    media_cache: Dict[str, str] = {}
 
     if mode == "imagepost":
-        title, content_html, cover_path, digest_candidate = run_imagepost_mode(
-            args, access_token, cache
+        article = run_imagepost_mode(
+            args, access_token, url_cache, media_cache, article_type
         )
     else:
-        title, content_html, cover_path, digest_candidate = run_article_mode(
-            args, access_token, cache
+        article = run_article_mode(
+            args, access_token, url_cache, media_cache, article_type
         )
 
-    if cover_path is None:
-        fail("cover image not resolved")
-
-    print("Step 3/4: uploading cover image for thumb_media_id...")
-    thumb_media_id = upload_cover_for_thumb(access_token, cover_path)
-
     print("Step 4/4: creating draft...")
-    digest = safe_digest(args.digest or digest_candidate)
-    result = add_draft(
-        access_token,
-        title=title,
-        author=args.author.strip(),
-        digest=digest,
-        source_url=args.source_url.strip(),
-        content_html=content_html,
-        thumb_media_id=thumb_media_id,
-    )
+    result = add_draft(access_token, article)
 
     media_id = result.get("media_id", "")
     print("SUCCESS: 草稿创建完成。")
