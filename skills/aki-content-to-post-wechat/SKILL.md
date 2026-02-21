@@ -12,7 +12,10 @@ description: 一站式内容创作流水线。从微信/网页链接生成口播
 ```
 ./content/<话题名称>/
 ├── meta.json              # 元数据（作者/链接等）
-├── source/article.md      # 原始文章
+├── source/                # 原始文章（支持多个）
+│   ├── article1.md       # 从URL下载或本地复制
+│   ├── article2.md
+│   └── ...
 ├── output/
 │   ├── cover.png          # 手绘封面图
 │   ├── script.md          # 口播文案 (15-30秒)
@@ -25,7 +28,10 @@ description: 一站式内容创作流水线。从微信/网页链接生成口播
 
 1. **自动生成话题名称** - 根据文章内容/URL自动提取，如"AI工具推荐"
 2. **创建话题文件夹**
-3. **下载文章** → source/article.md
+3. **获取文章** - 三种方式：
+   - **URL链接** → 使用 `aki-wechat-fetcher` 下载 → source/article.md
+   - **本地MD文件** → 复制到 source/article.md（不下载）
+   - **混合输入** → 多个URL或本地文件，逐个获取到 source/ 目录
 4. **提取元数据** → meta.json（禁止出现在封面/文案中）
 5. **生成封面** → output/cover.png
 6. **生成文案** → output/script.md, note.md, wechat-copy.md
