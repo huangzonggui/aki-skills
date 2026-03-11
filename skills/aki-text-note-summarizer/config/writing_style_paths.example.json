@@ -1,0 +1,5 @@
+{
+  "writing_style_paths": [
+    "/absolute/path/to/your-private-writing-style.md"
+  ]
+}

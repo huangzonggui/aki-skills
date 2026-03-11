@@ -1,0 +1,4 @@
+interface:
+  display_name: "Aki Adaptive Video Script"
+  short_description: "Generate Aki-style Chinese video scripts from 15s to 5min"
+  default_prompt: "Generate an adaptive-duration Aki-style voice script from article or note"

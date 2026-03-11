@@ -1,0 +1,7 @@
+{
+  "jy_projects_root_default": "/Users/aki/Movies/JianyingPro/User Data/Projects/com.lveditor.draft",
+  "ai_keys_env_path_default": "/Users/aki/.config/ai/keys.env",
+  "voice_profile_path_default": "skills/aki-image-article-video/.local/voice_profiles.json",
+  "jy_cache_music_dir_default": "/Users/aki/Movies/JianyingPro/User Data/Cache/music",
+  "runtime_reports_dir_default": "skills/aki-image-article-video/.local/runtime_reports"
+}

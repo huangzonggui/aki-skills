@@ -1,0 +1,23 @@
+{
+  "profiles": [
+    {
+      "voice_name": "日常松弛男",
+      "provider": "siliconflow",
+      "model": "IndexTeam/IndexTTS-2",
+      "voice_uri": "",
+      "ref_audio_path": "skills/aki-image-article-video/.local/voice_refs/relaxed_male_example.mp3",
+      "default_speed": 1.3,
+      "notes": "example profile; first run uploads ref audio and stores voice_uri locally"
+    },
+    {
+      "voice_name": "知性女声",
+      "provider": "siliconflow",
+      "model": "IndexTeam/IndexTTS-2",
+      "voice_uri": "",
+      "ref_audio_path": "skills/aki-image-article-video/.local/voice_refs/intellectual_female_example.mp3",
+      "default_speed": 1.0,
+      "notes": "example profile; replace with your local reference audio. global default is 1.0 unless overridden"
+    }
+  ],
+  "updated_at": 0
+}

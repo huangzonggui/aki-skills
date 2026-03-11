@@ -1,0 +1,4 @@
+interface:
+  display_name: "WeChat Channels Draft"
+  short_description: "Upload WeChat Channels video and save web draft only"
+  default_prompt: "Upload a video to WeChat Channels web creator and save as draft without publishing."

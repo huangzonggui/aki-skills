@@ -1,0 +1,5 @@
+{
+  "name": "aki-obsidian-brain",
+  "description": "Route natural-language capture and query requests into Aki's Obsidian system files.",
+  "version": "1.0.0"
+}

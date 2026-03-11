@@ -1,0 +1,4 @@
+interface:
+  display_name: "AKI-图文成片流水线"
+  short_description: "自然语言驱动：根据文章/口播稿+图片生成剪映草稿（音频优先、ASR字幕、BGM独立轨）"
+  default_prompt: "使用 aki-image-article-video 的自然语言入口生成草稿：最少只需 project_dir；优先复用现有口播稿，按真实音频时长建草稿，输出 draft/audio/srt/cpm/bgm 报告。"

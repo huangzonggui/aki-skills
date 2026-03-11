@@ -1,0 +1,22 @@
+{
+  "name": "aki-skills",
+  "owner": {
+    "name": "Aki Huang",
+    "email": "hzg1226620085@gmail.com"
+  },
+  "metadata": {
+    "description": "Skills shared by Aki Huang for improving daily work efficiency",
+    "version": "0.5.2"
+  },
+  "plugins": [
+    {
+      "name": "content-skills",
+      "description": "Skills shared by Aki Huang for improving daily work efficiency",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/aki-trendradar"
+      ]
+    }
+  ]
+}

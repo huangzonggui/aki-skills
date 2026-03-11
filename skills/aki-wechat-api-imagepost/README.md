@@ -1,0 +1,267 @@
+# aki-wechat-api-imagepost
+
+通过微信官方 API 发布公众号草稿，不依赖浏览器自动化。支持多模式：
+
+- `imagepost`：图片目录 -> 图文草稿
+- `article`：Markdown/HTML -> 文章草稿
+- `wenyan` 兼容模式（保留）
+
+## 1. 能力概览
+
+| 能力 | 说明 | 脚本 |
+| --- | --- | --- |
+| 图文发布 | 从本地图片目录发布 | `publish-official-draft.py --mode imagepost` |
+| 文章发布（Markdown） | 自动解析标题、上传本地图片并替换 URL | `publish-official-draft.py --mode article --markdown` |
+| 文章发布（HTML） | 自动上传 HTML 内本地图片并替换 URL | `publish-official-draft.py --mode article --html` |
+| 文章发布（直传 HTML） | 直接传入 HTML 字符串 | `publish-official-draft.py --mode article --content-html` |
+| 兼容发布 | 生成 markdown 并用 wenyan 发布 | `publish-image-post.sh` |
+
+说明：
+- `imagepost` 默认 `article_type=newspic`
+- `article` 默认 `article_type=news`
+
+## 2. 官方 API 流程
+
+脚本使用以下官方接口：
+
+1. `POST /cgi-bin/stable_token`
+2. `POST /cgi-bin/material/add_material?type=image`（封面 -> `thumb_media_id`）
+3. `POST /cgi-bin/media/uploadimg`（正文图片 -> URL）
+4. `POST /cgi-bin/draft/add`（新增草稿）
+
+文档入口（订阅号 API）：  
+- https://developers.weixin.qq.com/doc/subscription/api/
+
+## 2.1 本地文档缓存（推荐）
+
+为了避免重复在线请求文档，skill 内置了缓存脚本和 URL 清单：
+
+```bash
+python3 ./scripts/cache-subscription-docs.py
+```
+
+缓存输出：
+- `references/subscription-api/cache/`（本地 HTML）
+- `references/subscription-api/cache/manifest.json`（URL 与本地文件映射）
+
+说明：`cache/` 目录默认按本地缓存使用，不建议纳入版本控制。
+
+发布相关 API 导图：
+- `references/subscription-api/publish-api-map.md`
+- `references/subscription-api/subscription-api-urls.txt`
+
+## 3. 环境要求
+
+- Python 3.9+
+- 公众号开通开发者能力
+- 调用机公网 IP 已加入公众号 API 白名单
+
+可选：
+- Node.js（仅 `publish-image-post.sh` 需要）
+
+## 4. 凭证配置（推荐独立目录）
+
+```bash
+mkdir -p ~/.config/wechat
+cat > ~/.config/wechat/config <<'CFG'
+WECHAT_ID=你的AppID
+WECHAT_TOKEN=你的AppSecret
+CFG
+chmod 600 ~/.config/wechat/config
+```
+
+支持键名映射：
+
+- AppID：`WECHAT_APP_ID` / `WECHAT_ID` / `APPID` / `APP_ID`
+- AppSecret：`WECHAT_APP_SECRET` / `WECHAT_TOKEN` / `APPSECRET` / `APP_SECRET`
+
+也支持环境变量：
+
+```bash
+export WECHAT_APP_ID=你的AppID
+export WECHAT_APP_SECRET=你的AppSecret
+```
+
+## 5. 快速开始
+
+### 5.1 图文模式（图片目录）
+
+```bash
+python3 ./scripts/publish-official-draft.py \
+  --mode imagepost \
+  --dir "/path/to/images" \
+  --title "你的标题"
+
+# 如需强制按图文消息(news)方式发布，可显式指定：
+python3 ./scripts/publish-official-draft.py \
+  --mode imagepost \
+  --article-type news \
+  --dir "/path/to/images" \
+  --title "你的标题"
+```
+
+### 5.1.1 图文模式：只开留言（不限制粉丝）
+
+```bash
+python3 ./scripts/publish-official-draft.py \
+  --mode imagepost \
+  --article-type newspic \
+  --dir "/path/to/images" \
+  --title "你的标题" \
+  --text "正文内容" \
+  --open-comment \
+  --force-refresh-token
+```
+
+预期字段：
+- `need_open_comment=1`
+- `only_fans_can_comment=0`
+
+### 5.2 文章模式（Markdown）
+
+```bash
+python3 ./scripts/publish-official-draft.py \
+  --mode article \
+  --markdown "/path/to/article.md"
+```
+
+说明：
+- 若不传 `--title`，会尝试从 Markdown 的第一个 `# 标题` 提取。
+- Markdown 里的本地图片会自动上传并替换为微信 URL。
+- 若无本地图片，请手动传 `--cover /path/to/cover.jpg`。
+
+### 5.3 文章模式（HTML 文件）
+
+```bash
+python3 ./scripts/publish-official-draft.py \
+  --mode article \
+  --html "/path/to/article.html"
+```
+
+说明：
+- 会自动扫描 `<img src="...">` 中的本地路径并上传替换。
+- 若未传 `--title`，会尝试从 `<h1>` 或 `<title>` 提取。
+
+### 5.4 文章模式（直传 HTML）
+
+```bash
+python3 ./scripts/publish-official-draft.py \
+  --mode article \
+  --content-html "<h1>标题</h1><p>正文</p>" \
+  --title "标题" \
+  --cover "/path/to/cover.jpg"
+```
+
+### 5.5 常用增强参数
+
+```bash
+python3 ./scripts/publish-official-draft.py \
+  --mode article \
+  --markdown "/path/to/article.md" \
+  --author "Aki" \
+  --digest "摘要（<=120字）" \
+  --source-url "https://example.com" \
+  --force-refresh-token
+```
+
+## 6. 参数说明（publish-official-draft.py）
+
+| 参数 | 说明 |
+| --- | --- |
+| `--mode imagepost|article` | 发布模式（默认 `imagepost`） |
+| `--article-type news|newspic` | 文章类型；默认 `imagepost=newspic`，`article=news` |
+| `--open-comment` | 开启评论（`need_open_comment=1`） |
+| `--fans-only-comment` | 仅粉丝可评论（`only_fans_can_comment=1`，会自动开启评论） |
+| `--dir` | 图片目录（`imagepost` 必填） |
+| `--markdown` | Markdown 文件（`article` 三选一） |
+| `--html` | HTML 文件（`article` 三选一） |
+| `--content-html` | HTML 内容字符串（`article` 三选一） |
+| `--text` | `newspic` 模式下的文本内容（可选） |
+| `--title` | 标题（<=64） |
+| `--cover` | 封面图路径（未自动推断时必填） |
+| `--author` | 作者 |
+| `--digest` | 摘要（<=120） |
+| `--source-url` | 原文链接 |
+| `--appid` / `--secret` | 临时覆盖配置中的凭证 |
+| `--force-refresh-token` | 强制刷新 token |
+
+## 7. 封面规则
+
+- `imagepost`：默认用目录第一张图片作为封面。
+- `article`：默认尝试使用正文中第一张本地图片作为封面。
+- 若无法自动推断，必须传 `--cover`。
+
+补充：
+- 当 `article_type=newspic` 时，脚本会按文档要求写入 `image_info.image_list[].image_media_id`（永久素材 ID）。
+- 当 `article_type=news` 时，脚本会写入 `thumb_media_id`。
+
+## 8. 返回结果
+
+成功时返回：
+
+```json
+{
+  "media_id": "...",
+  "item": [{ "index": 0, "ad_count": 0 }]
+}
+```
+
+其中 `media_id` 即草稿 ID，可在公众号后台草稿箱查看。
+
+## 9. 常见问题
+
+### 9.1 `errcode=40164 invalid ip not in whitelist`
+调用机 IP 不在白名单。到微信开发者平台添加该公网 IP 后重试。
+
+经验补充（已验证）：
+- 即使白名单已配置，仍可能短时间报 40164。常见原因是微信侧白名单生效延迟，或 token 请求命中旧校验状态。
+- 建议等待 1-5 分钟后，使用 `--force-refresh-token` 重试一次。
+- 若机器开启系统/环境代理，微信看到的可能是代理出口 IP。必要时禁用代理后重试：
+
+```bash
+NO_PROXY='*' no_proxy='*' \
+HTTPS_PROXY='' HTTP_PROXY='' ALL_PROXY='' \
+https_proxy='' http_proxy='' all_proxy='' \
+python3 ./scripts/publish-official-draft.py ... --force-refresh-token
+```
+
+### 9.2 `invalid appid / invalid appsecret`
+检查 `~/.config/wechat/config`。注意 `WECHAT_TOKEN` 在这里是 AppSecret（不是公众号消息推送 token）。
+
+### 9.3 图片上传失败
+- 正文图建议 jpg/png 且 < 1MB（`uploadimg` 接口约束）
+- 检查文件路径和文件权限
+- 检查网络连通性
+
+### 9.4 草稿成功但后台没看到
+确认登录的是同一公众号账号，在“草稿箱”中查看。
+
+## 9.5 功能边界（订阅号 API）
+
+截至 2026-02-17 基于订阅号 API 文档核对：
+
+- 可通过 API 控制：
+  - 评论开关（`need_open_comment`）
+  - 是否仅粉丝可评（`only_fans_can_comment`）
+- 目前未发现对应草稿发布字段：
+  - 赞赏开关
+  - 默认合集归档（例如默认选中“AI”合集）
+  - 广告开关
+  - 创作来源（如“个人观点，仅供参考”）
+
+这些能力当前建议在公众号后台发布页手动设置（如平台开放新字段，再接入脚本）。
+
+## 10. 安全建议
+
+- `~/.config/wechat/config` 权限设为 `600`
+- 不要把凭证提交到仓库
+- 定期轮换 AppSecret
+
+## 11. 官方文档
+
+- 订阅号 API 入口: https://developers.weixin.qq.com/doc/subscription/api/
+- 稳定版 Token: https://developers.weixin.qq.com/doc/subscription/api/base/api_getstableaccesstoken.html
+- 上传图文消息图片: https://developers.weixin.qq.com/doc/subscription/api/material/permanent/api_uploadimage.html
+- 上传永久素材: https://developers.weixin.qq.com/doc/subscription/api/material/permanent/api_addmaterial.html
+- 新增草稿: https://developers.weixin.qq.com/doc/subscription/api/draftbox/draftmanage/api_draft_add.html
+- 发布任务（freepublish 提交）: https://developers.weixin.qq.com/doc/subscription/api/public/api_freepublish_submit.html

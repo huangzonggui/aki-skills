@@ -1,0 +1,4 @@
+interface:
+  display_name: "Aki Content Pipeline Pro"
+  short_description: "Core-note co-creation pipeline for multi-platform distribution"
+  default_prompt: "Run the full co-creation pipeline from sources to WeChat drafts and video package"

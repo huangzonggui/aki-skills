@@ -1,0 +1,18 @@
+{
+  "vault_path": "/Users/aki/Documents/ObsidianVaults/Aki数字资产",
+  "vault_name": "Aki数字资产",
+  "system_dir": "00-Aki第二大脑",
+  "files": {
+    "tasks": "任务清单.md",
+    "ideas": "灵感池.md",
+    "topics": "选题库.md",
+    "profile": "个人资料.md",
+    "assets": "创作积累.md",
+    "media": "多媒体索引.md",
+    "log": "操作日志.md"
+  },
+  "defaults": {
+    "task_quadrant": "Q2",
+    "source_rule": "optional"
+  }
+}
