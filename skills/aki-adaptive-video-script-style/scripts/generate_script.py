@@ -35,6 +35,15 @@ PRIVATE_SCRIPT_SAMPLE_CHAR_LIMIT = 5000
 PRIVATE_SCRIPT_SAMPLE_FILE_CHAR_LIMIT = 1200
 
 
+def _strip_reasoning_markup(text: str) -> str:
+    body = text.strip()
+    while True:
+        cleaned = re.sub(r"(?is)^\s*<think>.*?</think>\s*", "", body, count=1).strip()
+        if cleaned == body:
+            return cleaned
+        body = cleaned
+
+
 def _parse_env_file(path: Path) -> dict[str, str]:
     out: dict[str, str] = {}
     if not path.exists():
@@ -130,7 +139,7 @@ def chat_complete(
     choices = data.get("choices") or []
     if not choices:
         raise RuntimeError(f"Empty chat response: {raw[:400]}")
-    content = (((choices[0] or {}).get("message") or {}).get("content") or "").strip()
+    content = _strip_reasoning_markup((((choices[0] or {}).get("message") or {}).get("content") or ""))
     if not content:
         raise RuntimeError("Chat response contains empty content")
     return content

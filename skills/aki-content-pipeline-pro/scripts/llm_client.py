@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -24,6 +25,15 @@ COMFLY_CONFIG = Path.home() / ".config" / "comfly" / "config"
 DEFAULT_BASE = "https://ai.comfly.chat"
 CHAT_PATH = "/v1/chat/completions"
 DEFAULT_MODEL = "gemini-3-pro-preview-thinking"
+
+
+def _strip_reasoning_markup(text: str) -> str:
+    body = text.strip()
+    while True:
+        cleaned = re.sub(r"(?is)^\s*<think>.*?</think>\s*", "", body, count=1).strip()
+        if cleaned == body:
+            return cleaned
+        body = cleaned
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -93,7 +103,7 @@ def _read_chat_content(raw: str) -> str:
     choices = data.get("choices") or []
     if not choices:
         raise RuntimeError(f"Empty chat response: {raw[:400]}")
-    content = (((choices[0] or {}).get("message") or {}).get("content") or "").strip()
+    content = _strip_reasoning_markup((((choices[0] or {}).get("message") or {}).get("content") or ""))
     if not content:
         raise RuntimeError("Chat response contains empty content")
     return content

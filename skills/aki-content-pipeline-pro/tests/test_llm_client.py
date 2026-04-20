@@ -45,6 +45,15 @@ class LlmClientFallbackTests(unittest.TestCase):
         self.assertEqual(result, "# 标题\n\n正文")
         run_mock.assert_called_once()
 
+    def test_read_chat_content_strips_reasoning_markup(self) -> None:
+        raw = (
+            '{"choices":[{"message":{"content":"<think>internal</think>\\n\\n# 标题\\n\\n正文"}}]}'
+        )
+
+        result = llm_client._read_chat_content(raw)
+
+        self.assertEqual(result, "# 标题\n\n正文")
+
 
 if __name__ == "__main__":
     unittest.main()

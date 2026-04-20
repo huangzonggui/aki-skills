@@ -36,3 +36,11 @@ Page 04: 指令遵循更严格，但也可能让你“不适应”
 
     assert processed
     assert "最强Claude的削弱版" in processed
+
+
+def test_strip_reasoning_markup_removes_leading_think_block():
+    text = "<think>internal</think>\n\n第一句\n第二句"
+
+    result = generate_script._strip_reasoning_markup(text)
+
+    assert result == "第一句\n第二句"
