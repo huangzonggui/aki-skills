@@ -19,6 +19,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -30,18 +31,20 @@ from urllib import request as urlrequest
 from pipeline_config import load_pipeline_config
 from subtitle_engine import generate_aligned_srt
 
-DEFAULT_JY_PIPELINE = Path(
-    "/Users/aki/.agents/skills/jianying-editor/scripts/article_assets_to_video_pipeline.py"
-)
-DEFAULT_TRANSFORM_TS = Path(
-    "/Users/aki/Development/code/aki-skills/skills/aki-article-transformer/scripts/transform.ts"
-)
-DEFAULT_SCRIPT_TO_SRT = Path(
-    "/Users/aki/.agents/skills/jianying-editor/scripts/script_to_srt.py"
-)
-DEFAULT_SCRATCH_BUILDER = Path(
-    "/Users/aki/.agents/skills/jianying-editor/scripts/jy_from_scratch_builder.py"
-)
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = Path(os.getenv("AKI_SKILLS_REPO_ROOT", "")).expanduser().resolve() if os.getenv("AKI_SKILLS_REPO_ROOT") else SCRIPT_DIR.parents[2]
+SHARED_DIR = REPO_ROOT / "shared"
+if str(SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(SHARED_DIR))
+
+from aki_runtime import default_jianying_editor_root, skill_path  # noqa: E402
+
+
+JY_EDITOR_ROOT = default_jianying_editor_root()
+DEFAULT_JY_PIPELINE = JY_EDITOR_ROOT / "scripts" / "article_assets_to_video_pipeline.py"
+DEFAULT_TRANSFORM_TS = skill_path("aki-article-transformer", "scripts", "transform.ts", repo_root_path=REPO_ROOT)
+DEFAULT_SCRIPT_TO_SRT = JY_EDITOR_ROOT / "scripts" / "script_to_srt.py"
+DEFAULT_SCRATCH_BUILDER = JY_EDITOR_ROOT / "scripts" / "jy_from_scratch_builder.py"
 
 _CFG = load_pipeline_config()
 DEFAULT_PROJECTS_ROOT = _CFG.jy_projects_root
@@ -71,6 +74,23 @@ NON_SPOKEN_TITLE_RE = re.compile(
     r"^(?:视频)?口播(?:脚本|稿)(?:最终版|定稿|完整版|初稿)?$",
     re.IGNORECASE,
 )
+
+SUBTITLE_FONT_META = {
+    "本黑体": "7200743888816968247",
+    "莫雪体": "7290456347177390629",
+}
+YELLOW_PRESET_FILL = [1.0, 0.862745, 0.14902]
+YELLOW_PRESET_STROKE = {
+    "alpha": 1.0,
+    "width": 0.08,
+    "content": {
+        "render_type": "solid",
+        "solid": {
+            "alpha": 1.0,
+            "color": [0.0, 0.0, 0.0],
+        },
+    },
+}
 
 
 def _is_non_spoken_title_line(text: str) -> bool:
@@ -175,6 +195,236 @@ def maybe_write_report(report_path: str, report: dict[str, Any]) -> None:
     p = Path(report_path).expanduser().resolve()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def apply_subtitle_style_to_materials(
+    text_materials: list[dict[str, Any]],
+    *,
+    subtitle_font: str,
+    subtitle_font_size: float,
+    subtitle_style: str,
+) -> dict[str, Any]:
+    chosen_font = subtitle_font if subtitle_font in SUBTITLE_FONT_META else "本黑体"
+    font_id = SUBTITLE_FONT_META.get(chosen_font, SUBTITLE_FONT_META["本黑体"])
+    updated = 0
+    style_mode = subtitle_style or "default"
+
+    for material in text_materials:
+        raw_content = material.get("content")
+        if not isinstance(raw_content, str) or not raw_content.strip():
+            continue
+        try:
+            payload = json.loads(raw_content)
+        except Exception:
+            continue
+        styles = payload.get("styles")
+        if not isinstance(styles, list) or not styles:
+            continue
+
+        for style in styles:
+            style["size"] = float(subtitle_font_size)
+            style["font"] = {"id": font_id, "path": "D:"}
+            if style_mode == "yellow_preset":
+                style["fill"] = {
+                    "alpha": 1.0,
+                    "content": {
+                        "render_type": "solid",
+                        "solid": {
+                            "alpha": 1.0,
+                            "color": list(YELLOW_PRESET_FILL),
+                        },
+                    },
+                }
+                style["strokes"] = [dict(YELLOW_PRESET_STROKE)]
+            updated += 1
+        material["content"] = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+    return {
+        "font_name": chosen_font,
+        "font_id": font_id,
+        "font_size": float(subtitle_font_size),
+        "style_mode": style_mode,
+        "updated_count": updated,
+    }
+
+
+def apply_subtitle_style_to_draft(
+    projects_root: Path,
+    draft_name: str,
+    *,
+    subtitle_font: str,
+    subtitle_font_size: float,
+    subtitle_style: str,
+) -> dict[str, Any]:
+    draft_dir = projects_root / draft_name
+    content_path = draft_dir / "draft_content.json"
+    if not content_path.exists():
+        raise FileNotFoundError(f"draft content not found: {content_path}")
+
+    data = json.loads(content_path.read_text(encoding="utf-8"))
+    materials = data.setdefault("materials", {})
+    text_materials = materials.setdefault("texts", [])
+    report = apply_subtitle_style_to_materials(
+        text_materials,
+        subtitle_font=subtitle_font,
+        subtitle_font_size=subtitle_font_size,
+        subtitle_style=subtitle_style,
+    )
+
+    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    content_path.write_text(payload, encoding="utf-8")
+    for name in ("draft_info.json", "draft_info.json.bak"):
+        target = draft_dir / name
+        if target.exists():
+            target.write_text(payload, encoding="utf-8")
+    report["draft_path"] = str(draft_dir)
+    return report
+
+
+def _directory_size_bytes(path: Path) -> int:
+    total = 0
+    if not path.exists():
+        return total
+    for child in path.rglob("*"):
+        if not child.is_file():
+            continue
+        try:
+            total += child.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+_DRAFT_DUP_SUFFIX_RE = re.compile(r"\s*\(\d+\)$")
+
+
+def _normalize_draft_identity(raw: str | Path | None) -> str:
+    if raw is None:
+        return ""
+    text = str(raw).replace("\\", "/").rstrip("/")
+    base = Path(text).name if "/" in text else text
+    return _DRAFT_DUP_SUFFIX_RE.sub("", base)
+
+
+def sync_draft_meta_entry(
+    projects_root: Path,
+    draft_name: str,
+    *,
+    duration_us: int | None = None,
+    cover_path: Path | None = None,
+) -> dict[str, Any] | None:
+    draft_dir = projects_root / draft_name
+    meta_path = draft_dir / "draft_meta_info.json"
+    if not meta_path.exists() or not draft_dir.exists():
+        return None
+
+    computed_duration_us = int(duration_us or 0)
+    draft_content = draft_dir / "draft_content.json"
+    if draft_content.exists():
+        try:
+            payload = json.loads(draft_content.read_text(encoding="utf-8"))
+            computed_duration_us = int(payload.get("duration") or computed_duration_us or 0)
+        except Exception:
+            pass
+
+    cover = cover_path
+    if cover is None:
+        jpg = draft_dir / "draft_cover.jpg"
+        png = draft_dir / "draft_cover.png"
+        cover = jpg if jpg.exists() else png
+
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    now = int(time.time() * 1_000_000)
+    meta["draft_name"] = draft_name
+    meta["draft_fold_path"] = str(draft_dir)
+    meta["draft_root_path"] = str(projects_root)
+    if cover is not None and cover.exists():
+        meta["draft_cover"] = cover.name
+    meta["draft_id"] = str(meta.get("draft_id") or uuid.uuid4().hex.upper())
+    meta["tm_duration"] = computed_duration_us
+    meta["tm_draft_modified"] = now
+    meta["tm_draft_create"] = int(meta.get("tm_draft_create") or now)
+    meta["draft_timeline_materials_size_"] = _directory_size_bytes(draft_dir)
+
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    return meta
+
+
+def sync_root_meta_entry(
+    projects_root: Path,
+    draft_name: str,
+    *,
+    duration_us: int | None = None,
+    cover_path: Path | None = None,
+) -> None:
+    root_meta = projects_root / "root_meta_info.json"
+    draft_dir = projects_root / draft_name
+    if not root_meta.exists() or not draft_dir.exists():
+        return
+
+    draft_content = draft_dir / "draft_content.json"
+    computed_duration_us = int(duration_us or 0)
+    if draft_content.exists():
+        try:
+            payload = json.loads(draft_content.read_text(encoding="utf-8"))
+            computed_duration_us = int(payload.get("duration") or computed_duration_us or 0)
+        except Exception:
+            pass
+
+    cover = cover_path
+    if cover is None:
+        jpg = draft_dir / "draft_cover.jpg"
+        png = draft_dir / "draft_cover.png"
+        cover = jpg if jpg.exists() else png
+
+    draft_meta = sync_draft_meta_entry(
+        projects_root,
+        draft_name,
+        duration_us=computed_duration_us,
+        cover_path=cover,
+    )
+    rm = json.loads(root_meta.read_text(encoding="utf-8"))
+    stores = list(rm.get("all_draft_store") or [])
+    draft_key = _normalize_draft_identity(draft_name)
+    existing = next(
+        (
+            x
+            for x in stores
+            if _normalize_draft_identity(x.get("draft_name") or x.get("draft_fold_path")) == draft_key
+        ),
+        None,
+    )
+    base = dict(existing or (stores[0] if stores else {}))
+    now = int(time.time() * 1_000_000)
+
+    entry = base
+    entry["draft_name"] = draft_name
+    entry["draft_fold_path"] = str(draft_dir)
+    entry["draft_root_path"] = str(projects_root)
+    draft_info = draft_dir / "draft_info.json"
+    entry["draft_json_file"] = str(draft_info if draft_info.exists() else draft_content)
+    if cover is not None and cover.exists():
+        entry["draft_cover"] = str(cover)
+    entry["tm_duration"] = computed_duration_us
+    entry["tm_draft_modified"] = now
+    entry["tm_draft_create"] = int(entry.get("tm_draft_create") or now)
+    entry["draft_timeline_materials_size"] = _directory_size_bytes(draft_dir)
+    entry["draft_is_invisible"] = False
+    entry["streaming_edit_draft_ready"] = True
+    entry["draft_new_version"] = str(entry.get("draft_new_version") or "164.0.0")
+    entry["draft_id"] = str(
+        (draft_meta or {}).get("draft_id") or entry.get("draft_id") or uuid.uuid4().hex.upper()
+    )
+
+    stores = [
+        x
+        for x in stores
+        if _normalize_draft_identity(x.get("draft_name") or x.get("draft_fold_path")) != draft_key
+    ]
+    stores.insert(0, entry)
+    rm["all_draft_store"] = stores
+    rm["draft_ids"] = len(stores)
+    root_meta.write_text(json.dumps(rm, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
 
 def parse_assets(args: argparse.Namespace) -> List[Path]:
@@ -1079,32 +1329,7 @@ def patch_draft_audio(
     content_path.write_text(payload, encoding="utf-8")
     (draft_dir / "draft_info.json").write_text(payload, encoding="utf-8")
     (draft_dir / "draft_info.json.bak").write_text(payload, encoding="utf-8")
-
-    root_meta = projects_root / "root_meta_info.json"
-    if root_meta.exists():
-        rm = json.loads(root_meta.read_text(encoding="utf-8"))
-        stores = rm.get("all_draft_store", [])
-        stores = [x for x in stores if x.get("draft_name") != draft_name]
-        entry = stores[0].copy() if stores else {}
-        now = int(time.time() * 1_000_000)
-        entry["draft_name"] = draft_name
-        entry["draft_fold_path"] = str(draft_dir)
-        entry["draft_root_path"] = str(projects_root)
-        entry["draft_json_file"] = str(draft_dir / "draft_info.json")
-        cover_jpg = draft_dir / "draft_cover.jpg"
-        cover_png = draft_dir / "draft_cover.png"
-        entry["draft_cover"] = str(cover_jpg if cover_jpg.exists() else cover_png)
-        entry["tm_draft_create"] = now
-        entry["tm_draft_modified"] = now
-        entry["tm_duration"] = target_us
-        entry["draft_id"] = uuid.uuid4().hex.upper()
-        stores.insert(0, entry)
-        rm["all_draft_store"] = stores
-        rm["draft_ids"] = len(stores)
-        root_meta.write_text(
-            json.dumps(rm, ensure_ascii=False, separators=(",", ":")),
-            encoding="utf-8",
-        )
+    sync_root_meta_entry(projects_root, draft_name, duration_us=target_us)
 
 
 
@@ -1154,9 +1379,11 @@ def main() -> None:
         choices=["strict", "medium", "off"],
         default="strict",
     )
-    parser.add_argument("--subtitle-max-chars", type=int, default=26)
-    parser.add_argument("--subtitle-max-duration", type=float, default=3.2)
-    parser.add_argument("--subtitle-font", default="本黑体")
+    parser.add_argument("--subtitle-max-chars", type=int, default=34)
+    parser.add_argument("--subtitle-max-duration", type=float, default=4.6)
+    parser.add_argument("--subtitle-font", default="莫雪体")
+    parser.add_argument("--subtitle-font-size", type=float, default=10.0)
+    parser.add_argument("--subtitle-style", default="yellow_preset")
     parser.add_argument("--subtitle-text-source", choices=["auto", "asr", "script"], default="script")
     parser.add_argument("--whisper-model", default="small")
     parser.add_argument("--whisper-language", default="zh")
@@ -1199,7 +1426,7 @@ def main() -> None:
         raise ValueError(
             "invalid --projects-root on macOS: received Windows-style path "
             f"'{raw_projects_root}'. Use an absolute mac path like "
-            "'/Users/aki/Movies/JianyingPro/User Data/Projects/com.lveditor.draft'."
+            f"'{DEFAULT_PROJECTS_ROOT}'."
         )
     projects_root = Path(raw_projects_root).expanduser().resolve()
     workdir = Path(args.workdir).expanduser().resolve()
@@ -1241,6 +1468,7 @@ def main() -> None:
     warnings: List[str] = []
     voice_uri_used = ""
     subtitle_report: dict[str, Any] = {}
+    subtitle_style_report: dict[str, Any] = {}
 
     if args.skip_audio:
         srt_out = workdir / f"{args.new_name}.srt"
@@ -1262,6 +1490,13 @@ def main() -> None:
             transition_fallback=args.transition_fallback,
             transition_duration=args.transition_duration,
             subtitle_font=args.subtitle_font,
+        )
+        subtitle_style_report = apply_subtitle_style_to_draft(
+            projects_root=projects_root,
+            draft_name=args.new_name,
+            subtitle_font=args.subtitle_font,
+            subtitle_font_size=args.subtitle_font_size,
+            subtitle_style=args.subtitle_style,
         )
         tts_text = clean_script_text(
             generated_script,
@@ -1293,6 +1528,7 @@ def main() -> None:
             "cpm_report": cpm_report,
             "speed_report": speed_report,
             "subtitle_report": subtitle_report,
+            "subtitle_style_report": subtitle_style_report,
             "warnings": warnings,
             "tts_provider": "none(skip_audio)",
             "subtitle_mode_used": "heuristic",
@@ -1531,6 +1767,13 @@ def main() -> None:
         transition_duration=args.transition_duration,
         subtitle_font=args.subtitle_font,
     )
+    subtitle_style_report = apply_subtitle_style_to_draft(
+        projects_root=projects_root,
+        draft_name=args.new_name,
+        subtitle_font=args.subtitle_font,
+        subtitle_font_size=args.subtitle_font_size,
+        subtitle_style=args.subtitle_style,
+    )
 
     draft_dir = projects_root / args.new_name
     local_assets = draft_dir / "local_assets"
@@ -1572,6 +1815,7 @@ def main() -> None:
         "cpm_report": cpm_report,
         "speed_report": speed_report,
         "subtitle_report": subtitle_report,
+        "subtitle_style_report": subtitle_style_report,
         "warnings": warnings,
         "tts_provider": chosen_provider,
         "subtitle_mode_used": subtitle_label,
