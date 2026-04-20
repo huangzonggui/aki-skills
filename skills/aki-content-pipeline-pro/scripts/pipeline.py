@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
@@ -31,35 +33,44 @@ from utils import (
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = Path(os.getenv("AKI_SKILLS_REPO_ROOT", "")).expanduser().resolve() if os.getenv("AKI_SKILLS_REPO_ROOT") else SCRIPT_DIR.parents[2]
+SHARED_DIR = REPO_ROOT / "shared"
+if str(SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(SHARED_DIR))
+
+from aki_runtime import default_publish_profile, skill_path  # noqa: E402
+
 BOOTSTRAP = SCRIPT_DIR / "bootstrap_topic.py"
 COLLECT = SCRIPT_DIR / "collect_sources.py"
 RENDER = SCRIPT_DIR / "render_images.py"
 PUBLISH = SCRIPT_DIR / "publish_wechat_browser.py"
 VIDEO = SCRIPT_DIR / "build_video_file.py"
 
-SUMMARIZER_SKILL = Path(
-    "/Users/aki/Development/code/aki-skills/skills/aki-text-note-summarizer/SKILL.md"
+SUMMARIZER_SKILL = skill_path("aki-text-note-summarizer", "SKILL.md", repo_root_path=REPO_ROOT)
+DEAI_SKILL = skill_path("aki-deai-writing", "SKILL.md", repo_root_path=REPO_ROOT)
+ADAPTIVE_SCRIPT = skill_path(
+    "aki-adaptive-video-script-style",
+    "scripts",
+    "generate_script.py",
+    repo_root_path=REPO_ROOT,
 )
-ADAPTIVE_SCRIPT = Path(
-    "/Users/aki/Development/code/aki-skills/skills/aki-adaptive-video-script-style/scripts/generate_script.py"
-)
-DEFAULT_PUBLISH_PROFILE = Path(
-    "/Users/aki/Library/Application Support/aki-skills/publisher-profiles/zimeiti-publisher"
-)
-GENERIC_HEADING_PREFIXES = (
-    "我为什么关注",
-    "我为什么特别关注",
-    "它强在哪",
-    "我的判断",
-    "个人判断",
-    "我的看法",
-    "我的观点",
-    "最后",
-    "总结一下",
-    "一个结论",
-    "总结",
-    "结论",
-)
+DEFAULT_PUBLISH_PROFILE = default_publish_profile()
+REUSABLE_CONTRACT_HEADING = "Reusable Contract"
+ALLOWED_CONTRACT_PLACEHOLDERS = {
+    "extra_context",
+    "source_text",
+    "draft_text",
+    "heading_issues",
+}
+CONTRACT_OPERATION_TEMPERATURES = {
+    "draft": 0.6,
+    "rewrite": 0.2,
+    "heading_repair": 0.3,
+}
+SKILL_PATHS = {
+    "aki-text-note-summarizer": SUMMARIZER_SKILL,
+    "aki-deai-writing": DEAI_SKILL,
+}
 PROFILE_FILENAMES = ("Authors.com", "authors.com")
 PERSONAL_NOTE_FILENAME = "个人笔记.md"
 PRIVATE_STYLE_CONFIG_FILENAMES = ("writing_style_paths.local.json",)
@@ -169,20 +180,6 @@ def _ensure_core_note_approval_current(topic_root: Path, layout) -> None:
         )
 
 
-def _extract_summarizer_prompt() -> str:
-    if not SUMMARIZER_SKILL.exists():
-        return ""
-    text = SUMMARIZER_SKILL.read_text(encoding="utf-8", errors="ignore")
-    match = re.search(r"Use the following style guide.*?```([\s\S]*?)```", text)
-    block = (match.group(1).strip() if match else "").strip()
-    extra = ""
-    extra_start = text.find("## Writing constraint")
-    extra_end = text.find("## Workflow")
-    if extra_start != -1 and extra_end != -1 and extra_end > extra_start:
-        extra = text[extra_start:extra_end].strip()
-    return "\n\n".join(part for part in [block, extra] if part).strip()
-
-
 def _ensure_topic_root(topic_root: str) -> Path:
     path = Path(topic_root).expanduser().resolve()
     if not path.exists():
@@ -276,6 +273,199 @@ def _build_summary_context(topic_root: Path) -> str:
     return "\n\n".join(blocks).strip()
 
 
+def _extract_markdown_section(text: str, heading_level: int, title: str) -> str:
+    level = "#" * heading_level
+    next_level = "#" * max(1, heading_level - 1)
+    pattern = rf"(?ms)^{level}\s+{re.escape(title)}\s*$([\s\S]*?)(?=^{level}\s+|^{next_level}\s+|\Z)"
+    match = re.search(pattern, text)
+    return (match.group(1) if match else "").strip()
+
+
+def _extract_named_fenced_block(text: str, heading: str) -> str:
+    pattern = rf"(?ms)^####\s+{re.escape(heading)}\s*$\s*```[a-zA-Z0-9_-]*\s*([\s\S]*?)```"
+    match = re.search(pattern, text)
+    if not match:
+        raise RuntimeError(f"Missing fenced block for '{heading}'")
+    return match.group(1).strip()
+
+
+def _parse_scalar(value: str):
+    raw = value.strip()
+    if raw in {"true", "True"}:
+        return True
+    if raw in {"false", "False"}:
+        return False
+    if re.fullmatch(r"-?\d+", raw):
+        return int(raw)
+    if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
+        return raw[1:-1]
+    return raw
+
+
+def _parse_simple_yaml_block(text: str) -> dict[str, object]:
+    data: dict[str, object] = {}
+    current_list_key = ""
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("- "):
+            if not current_list_key:
+                raise RuntimeError(f"Invalid YAML list item without key: {stripped}")
+            current = data.get(current_list_key)
+            if not isinstance(current, list):
+                raise RuntimeError(f"Key '{current_list_key}' is not a list")
+            current.append(_parse_scalar(stripped[2:]))
+            continue
+        match = re.match(r"^([A-Za-z0-9_]+):(.*)$", stripped)
+        if not match:
+            raise RuntimeError(f"Invalid YAML line: {stripped}")
+        key = match.group(1).strip()
+        value_text = match.group(2).strip()
+        if not value_text:
+            data[key] = []
+            current_list_key = key
+            continue
+        data[key] = _parse_scalar(value_text)
+        current_list_key = ""
+    return data
+
+
+def _extract_metadata_block(section: str) -> dict[str, object]:
+    match = re.search(r"(?ms)```yaml\s*([\s\S]*?)```", section)
+    if not match:
+        raise RuntimeError("Missing reusable contract metadata block")
+    return _parse_simple_yaml_block(match.group(1).strip())
+
+
+def _extract_operation_blocks(section: str) -> dict[str, str]:
+    matches = list(re.finditer(r"(?m)^###\s+Operation:\s*([A-Za-z0-9_]+)\s*$", section))
+    operations: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        name = match.group(1).strip()
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(section)
+        operations[name] = section[start:end].strip()
+    return operations
+
+
+def _validate_placeholders(text: str, skill_name: str, operation: str, block_name: str) -> None:
+    for match in re.finditer(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}", text):
+        placeholder = match.group(1).strip()
+        if placeholder not in ALLOWED_CONTRACT_PLACEHOLDERS:
+            raise RuntimeError(
+                f"Unsupported placeholder in {skill_name}#{operation} {block_name}: {placeholder}"
+            )
+
+
+def _validate_output_contract(output_contract: dict[str, object], skill_name: str, operation: str) -> None:
+    required_keys = ("require_h1", "ban_numbered_subheadings", "generic_heading_prefixes")
+    for key in required_keys:
+        if key not in output_contract:
+            raise RuntimeError(f"Missing output contract key in {skill_name}#{operation}: {key}")
+    if not isinstance(output_contract.get("require_h1"), bool):
+        raise RuntimeError(f"Invalid require_h1 in {skill_name}#{operation}")
+    if not isinstance(output_contract.get("ban_numbered_subheadings"), bool):
+        raise RuntimeError(f"Invalid ban_numbered_subheadings in {skill_name}#{operation}")
+    generic_prefixes = output_contract.get("generic_heading_prefixes")
+    if not isinstance(generic_prefixes, list):
+        raise RuntimeError(f"Invalid generic_heading_prefixes in {skill_name}#{operation}")
+
+
+@functools.lru_cache(maxsize=None)
+def _load_skill_contract(skill_name: str) -> dict[str, object]:
+    path = SKILL_PATHS.get(skill_name)
+    if not path:
+        raise RuntimeError(f"Unknown skill in reusable contract: {skill_name}")
+    if not path.exists():
+        raise RuntimeError(f"Skill file not found for {skill_name}: {path}")
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    section = _extract_markdown_section(text, 2, REUSABLE_CONTRACT_HEADING)
+    if not section:
+        raise RuntimeError(f"Missing '## {REUSABLE_CONTRACT_HEADING}' in {path}")
+    metadata = _extract_metadata_block(section)
+    if metadata.get("version") != 1:
+        raise RuntimeError(f"Invalid reusable contract version in {path}: {metadata.get('version')}")
+    operation_names = metadata.get("operations")
+    if not isinstance(operation_names, list) or not operation_names:
+        raise RuntimeError(f"Invalid operations metadata in {path}")
+    raw_operations = _extract_operation_blocks(section)
+    operations: dict[str, dict[str, object]] = {}
+    for item in operation_names:
+        name = str(item).strip()
+        block = raw_operations.get(name)
+        if not block:
+            raise RuntimeError(f"Missing operation block '{name}' in {path}")
+        uses_match = re.search(r"(?ms)^####\s+Uses Operation\s*$\s*```yaml\s*([\s\S]*?)```", block)
+        if uses_match:
+            uses = _parse_simple_yaml_block(uses_match.group(1).strip())
+            target_skill = str(uses.get("skill") or "").strip()
+            target_operation = str(uses.get("operation") or "").strip()
+            if not target_skill or not target_operation:
+                raise RuntimeError(f"Invalid Uses Operation block in {path}#{name}")
+            operations[name] = {
+                "kind": "uses",
+                "skill": target_skill,
+                "operation": target_operation,
+            }
+            continue
+        system_prompt = _extract_named_fenced_block(block, "System Prompt")
+        user_template = _extract_named_fenced_block(block, "User Template")
+        output_contract = _parse_simple_yaml_block(_extract_named_fenced_block(block, "Output Contract"))
+        _validate_placeholders(system_prompt, skill_name, name, "System Prompt")
+        _validate_placeholders(user_template, skill_name, name, "User Template")
+        _validate_output_contract(output_contract, skill_name, name)
+        operations[name] = {
+            "kind": "prompt",
+            "system_prompt": system_prompt,
+            "user_template": user_template,
+            "output_contract": output_contract,
+        }
+    return {
+        "skill_name": skill_name,
+        "operations": operations,
+    }
+
+
+def _resolve_contract_operation(
+    skill_name: str,
+    operation_name: str,
+    visited: set[tuple[str, str]],
+) -> dict[str, object]:
+    key = (skill_name, operation_name)
+    if key in visited:
+        raise RuntimeError(f"Duplicate or circular contract dependency detected: {skill_name}#{operation_name}")
+    visited.add(key)
+    contract = _load_skill_contract(skill_name)
+    operations = contract["operations"]
+    operation = operations.get(operation_name)
+    if not isinstance(operation, dict):
+        raise RuntimeError(f"Operation not found: {skill_name}#{operation_name}")
+    if operation.get("kind") == "uses":
+        target_skill = str(operation.get("skill") or "").strip()
+        target_operation = str(operation.get("operation") or "").strip()
+        if not target_skill or not target_operation:
+            raise RuntimeError(f"Invalid Uses Operation target in {skill_name}#{operation_name}")
+        return _resolve_contract_operation(target_skill, target_operation, visited)
+    return {
+        "skill_name": skill_name,
+        "operation_name": operation_name,
+        "system_prompt": str(operation.get("system_prompt") or "").strip(),
+        "user_template": str(operation.get("user_template") or "").strip(),
+        "output_contract": dict(operation.get("output_contract") or {}),
+    }
+
+
+def _render_contract_template(template: str, values: dict[str, str]) -> str:
+    def replace(match: re.Match[str]) -> str:
+        name = match.group(1).strip()
+        if name not in ALLOWED_CONTRACT_PLACEHOLDERS:
+            raise RuntimeError(f"Unsupported placeholder in contract template: {name}")
+        return values.get(name, "")
+
+    return re.sub(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}", replace, template).strip()
+
+
 def _normalize_heading_text(text: str) -> str:
     value = text.strip()
     value = re.sub(r"^\d+[\.、:：]\s*", "", value)
@@ -283,9 +473,16 @@ def _normalize_heading_text(text: str) -> str:
     return value
 
 
-def _find_heading_issues(text: str) -> list[str]:
+def _find_heading_issues(text: str, output_contract: dict[str, object]) -> list[str]:
     issues: list[str] = []
     has_h1 = False
+    generic_prefixes = tuple(
+        str(item).strip()
+        for item in (output_contract.get("generic_heading_prefixes") or [])
+        if str(item).strip()
+    )
+    ban_numbered = bool(output_contract.get("ban_numbered_subheadings"))
+    require_h1 = bool(output_contract.get("require_h1"))
     for raw in text.splitlines():
         line = raw.strip()
         match = re.match(r"^(#{1,3})\s+(.+)$", line)
@@ -296,52 +493,71 @@ def _find_heading_issues(text: str) -> list[str]:
         normalized = _normalize_heading_text(title)
         if level == 1:
             has_h1 = True
-        if level >= 2 and re.match(r"^\d+[\.、:：]\s*", title):
+        if ban_numbered and level >= 2 and re.match(r"^\d+[\.、:：]\s*", title):
             issues.append(f"numbered heading: {title}")
-        if any(normalized.startswith(prefix) for prefix in GENERIC_HEADING_PREFIXES):
+        if generic_prefixes and any(normalized.startswith(prefix) for prefix in generic_prefixes):
             issues.append(f"generic heading: {title}")
-    if not has_h1:
+    if require_h1 and not has_h1:
         issues.append("missing h1 title")
     return issues
 
 
-def _rewrite_markdown_headings(text: str, model_override: str = "") -> str:
-    issues = _find_heading_issues(text)
+def _format_heading_issues(issues: list[str]) -> str:
     if not issues:
-        return text.strip()
-    issue_text = "\n".join(f"- {item}" for item in issues)
-    system_prompt = "你是中文内容编辑。你只负责修正 markdown 的标题结构，尤其是 H1/H2/H3。输出完整 markdown 成品，不要解释过程。"
-    user_prompt = (
-        "请修正下面这篇 markdown 的标题。\n"
-        "发现的问题：\n"
-        f"{issue_text}\n\n"
-        "修正要求：\n"
-        "1) 必须保留或补出一个 H1 标题；\n"
-        "2) H1/H2/H3 必须从相邻正文里抽最强信息点，不要写结构标签；\n"
-        "3) 禁止使用这些泛标题或其变体：我为什么特别关注、它强在哪、我的判断、个人判断、我的观点、最后、总结一下、一个结论、总结、结论；\n"
-        "4) 默认不要使用 `## 1.` `## 2.` 这种编号式标题；\n"
-        "5) 尽量只改标题，不改正文事实、段落顺序、列表内容；\n"
-        "6) 输出仍然是完整 markdown。\n\n"
-        "原文如下：\n\n"
-        f"{text.strip()}\n"
+        return "- no obvious structural issue found; only improve titles if you can make them more informative without changing facts."
+    return "\n".join(f"- {item}" for item in issues)
+
+
+def _run_prompt_operation(
+    operation: dict[str, object],
+    values: dict[str, str],
+    model_override: str = "",
+) -> str:
+    name = str(operation.get("operation_name") or "").strip()
+    system_prompt = str(operation.get("system_prompt") or "").strip()
+    user_template = str(operation.get("user_template") or "").strip()
+    user_prompt = _render_contract_template(user_template, values)
+    temperature = CONTRACT_OPERATION_TEMPERATURES.get(name, 0.6)
+    return chat_complete(system_prompt, user_prompt, model_override=model_override, temperature=temperature).strip()
+
+
+def _generate_core_note_draft(source_text: str, extra_context: str, model_override: str = "") -> str:
+    visited: set[tuple[str, str]] = set()
+    draft_op = _resolve_contract_operation("aki-text-note-summarizer", "draft", visited)
+    draft_text = _run_prompt_operation(
+        draft_op,
+        {
+            "extra_context": extra_context,
+            "source_text": source_text,
+            "draft_text": "",
+            "heading_issues": "",
+        },
+        model_override=model_override,
     )
-    revised = chat_complete(system_prompt, user_prompt, model_override=model_override, temperature=0.3)
-    return revised.strip() or text.strip()
-
-
-def _ensure_dynamic_headings(text: str, model_override: str = "") -> str:
-    content = text.strip()
-    if not content:
-        return content
-    for _ in range(2):
-        issues = _find_heading_issues(content)
-        if not issues:
-            return content
-        try:
-            content = _rewrite_markdown_headings(content, model_override=model_override)
-        except Exception:
-            return content
-    return content
+    rewrite_op = _resolve_contract_operation("aki-text-note-summarizer", "rewrite", visited)
+    rewritten_text = _run_prompt_operation(
+        rewrite_op,
+        {
+            "extra_context": extra_context,
+            "source_text": source_text,
+            "draft_text": draft_text,
+            "heading_issues": "",
+        },
+        model_override=model_override,
+    )
+    heading_op = _resolve_contract_operation("aki-text-note-summarizer", "heading_repair", visited)
+    heading_output_contract = dict(heading_op.get("output_contract") or {})
+    heading_text = _run_prompt_operation(
+        heading_op,
+        {
+            "extra_context": extra_context,
+            "source_text": source_text,
+            "draft_text": rewritten_text,
+            "heading_issues": _format_heading_issues(_find_heading_issues(rewritten_text, heading_output_contract)),
+        },
+        model_override=model_override,
+    )
+    return heading_text.strip()
 
 
 def _compress_for_imagepost(text: str, max_chars: int = 320) -> str:
@@ -611,6 +827,92 @@ def _generate_segment_script(
         return text
 
 
+def _rewrite_segment_script_for_tts(script_text: str) -> str:
+    text = str(script_text or "").strip()
+    if not text:
+        return ""
+
+    def _normalize_tts_terms(line: str) -> str:
+        normalized = line
+        normalized = re.sub(r"(?i)(?<![A-Za-z])agents?(?![A-Za-z])", "智能体", normalized)
+        normalized = re.sub(r"(?i)(?<![A-Za-z])openclaw(?![A-Za-z])", "Open Claw", normalized)
+        normalized = re.sub(r"([a-z])([A-Z]{2,})", r"\1 \2", normalized)
+        normalized = re.sub(
+            r"(\d)([A-Z]{2,5})(?![A-Za-z])",
+            lambda match: f"{match.group(1)} {' '.join(match.group(2))}",
+            normalized,
+        )
+        normalized = re.sub(
+            r"(?<![A-Za-z])([A-Z]{2,5})(?![A-Za-z])",
+            lambda match: " ".join(match.group(1)),
+            normalized,
+        )
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        normalized = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", normalized)
+        normalized = re.sub(r"\s+([，。！？；：])", r"\1", normalized)
+        return normalized
+
+    lines: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        line = re.sub(r"^#{1,6}\s*", "", line)
+        line = re.sub(r"^[-*]\s*", "", line)
+        line = re.sub(r"^\d+[\.\)、]\s*", "", line)
+        line = re.sub(r"^第\s*\d+\s*点[：:\s]*", "", line)
+        line = line.replace("；", "。").replace(";", "。")
+        line = line.replace("——", "，").replace("—", "，")
+        line = re.sub(r"[“”]", '"', line)
+        line = re.sub(r"\s+", " ", line).strip()
+        line = _normalize_tts_terms(line)
+        if line:
+            lines.append(line)
+
+    def _flush_piece(text_part: str, bucket: list[str]) -> None:
+        chunk = text_part.strip(" ，。！？；;：:")
+        if not chunk:
+            return
+        if len(chunk) > 24:
+            subparts = [item.strip() for item in re.split(r"[，、]", chunk) if item.strip()]
+            if len(subparts) > 1:
+                for item in subparts:
+                    _flush_piece(item, bucket)
+                return
+        if chunk[-1] not in "。！？":
+            chunk += "。"
+        bucket.append(chunk)
+
+    rewritten: list[str] = []
+    for line in lines:
+        parts = [item for item in re.split(r"(?<=[。！？])", line) if item.strip()]
+        if not parts:
+            parts = [line]
+        for part in parts:
+            _flush_piece(part, rewritten)
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for line in rewritten:
+        if line in seen:
+            continue
+        seen.add(line)
+        deduped.append(line)
+
+    merged: list[str] = []
+    current = ""
+    for line in deduped:
+        candidate = f"{current}{line}" if current else line
+        if current and len(candidate) > 42:
+            merged.append(current)
+            current = line
+            continue
+        current = candidate
+    if current:
+        merged.append(current)
+    return "\n".join(merged).strip()
+
+
 def intent_init_topic(args: argparse.Namespace) -> int:
     cmd = [
         "--cwd",
@@ -652,34 +954,10 @@ def intent_summarize_core_note(args: argparse.Namespace) -> int:
         raise RuntimeError("Clean refs are empty")
 
     set_step(topic_root, "summarize_core_note", "running", message="Generating core note draft from refs")
-    prompt_block = _extract_summarizer_prompt()
-    system_prompt = "你是 Aki 的内容助手。请严格按给定风格产出“个人核心笔记”初稿。输出只要 markdown 正文，不要解释过程。"
-    if prompt_block:
-        system_prompt += "\n\n以下为已接入的 aki-text-note-summarizer 风格约束：\n\n" + prompt_block
-
-    user_prompt = (
-        "请基于以下资料生成一篇“核心个人笔记”初稿。\n"
-        "要求：\n"
-        "1) 保留个人观点空间，避免平铺复述；\n"
-        "2) 结构清晰，适合后续裂变到公众号/小红书/视频；\n"
-        "3) 默认中文输出；\n"
-        "4) 默认面向普通非技术用户，少用技术黑话；\n"
-        "5) 像 Computer Use、Agent、Context Window 这类词，第一次出现时优先换成大众说法，或立刻补一句白话解释；\n"
-        "6) GPT、ChatGPT、OpenClaw、Dexy、Claude、Codex 这类知名产品名可以直接保留；\n"
-        "7) 不要捏造数字、百分比、榜单排名、测试结果。资料里没有明确给出的，宁可不写；\n"
-        "8) 默认先把最重要的信息点讲清楚，再展开判断。优先交代“谁做的、产品叫什么、现在是什么状态、为什么值得关注”；\n"
-        "9) 如果选题本身就是一个单一信息点，不要为了显得完整而硬写成长解释文，宁可短一点、准一点；\n"
-        "10) 避免模板化表达，不要频繁使用“真正的变化”“最后该记住的结论”这类空泛结构句；\n"
-        "11) 标题和小标题尽量具体，段落尽量短。若用户的个人笔记已经给了结构，就优先服从个人笔记。\n\n"
-    )
     extra_context = _build_summary_context(topic_root)
-    if extra_context:
-        user_prompt += "以下是必须吸收的额外上下文：\n\n" + extra_context + "\n\n"
-    user_prompt += "资料如下：\n\n" + merged + "\n"
 
     try:
-        content = chat_complete(system_prompt, user_prompt, model_override=args.model)
-        content = _ensure_dynamic_headings(content, model_override=args.model)
+        content = _generate_core_note_draft(merged, extra_context, model_override=args.model)
         layout.core_note_draft_path.write_text(content.strip() + "\n", encoding="utf-8")
         _block_core_note_approval(
             topic_root,
@@ -899,6 +1177,7 @@ def intent_derive_video_scripts(args: argparse.Namespace) -> int:
                 target_sec=cover_duration,
                 model_override=args.model,
             )
+            cover_tts_script = _rewrite_segment_script_for_tts(cover_script) or cover_script
             segments.append(
                 {
                     "slot": 1,
@@ -909,6 +1188,7 @@ def intent_derive_video_scripts(args: argparse.Namespace) -> int:
                     "theme": str(plan.get("title") or layout.root.name),
                     "duration_sec": float(cover_duration),
                     "script": cover_script,
+                    "tts_script": cover_tts_script,
                 }
             )
 
@@ -930,6 +1210,7 @@ def intent_derive_video_scripts(args: argparse.Namespace) -> int:
                     target_sec=duration,
                     model_override=args.model,
                 )
+                tts_script = _rewrite_segment_script_for_tts(script_text) or script_text
                 segments.append(
                     {
                         "slot": len(segments) + 1,
@@ -940,6 +1221,7 @@ def intent_derive_video_scripts(args: argparse.Namespace) -> int:
                         "theme": str(page.get("title") or ""),
                         "duration_sec": float(duration),
                         "script": script_text,
+                        "tts_script": tts_script,
                         "page_index": int(page["index"]),
                     }
                 )
@@ -958,6 +1240,7 @@ def intent_derive_video_scripts(args: argparse.Namespace) -> int:
 
             header = f"# {VIDEO_PLATFORM_CONFIG[platform]['label']} 口播脚本\n\n"
             blocks: list[str] = [header.rstrip()]
+            tts_blocks: list[str] = [header.rstrip().replace("口播脚本", "TTS口播脚本")]
             for segment in segments:
                 blocks.append(f"## {int(segment['slot']):02d}. {segment['image_key']}")
                 blocks.append(f"- 图片：{segment['image_relative']}")
@@ -967,9 +1250,22 @@ def intent_derive_video_scripts(args: argparse.Namespace) -> int:
                 blocks.append("")
                 blocks.append(str(segment["script"]).strip())
                 blocks.append("")
+                tts_blocks.append(f"## {int(segment['slot']):02d}. {segment['image_key']}")
+                tts_blocks.append(f"- 图片：{segment['image_relative']}")
+                tts_blocks.append(f"- 类型：{segment['kind']}")
+                tts_blocks.append(f"- 主题：{segment['theme']}")
+                tts_blocks.append(f"- 建议时长：{segment['duration_sec']}s")
+                tts_blocks.append("")
+                tts_blocks.append(str(segment.get("tts_script") or segment["script"]).strip())
+                tts_blocks.append("")
             layout.video_voice_script_path(platform).write_text("\n".join(blocks).strip() + "\n", encoding="utf-8")
+            layout.video_voice_tts_script_path(platform).write_text(
+                "\n".join(tts_blocks).strip() + "\n",
+                encoding="utf-8",
+            )
             set_artifact(topic_root, f"video_timeline_{platform}", str(layout.video_timeline_path(platform)))
             set_artifact(topic_root, f"video_script_{platform}", str(layout.video_voice_script_path(platform)))
+            set_artifact(topic_root, f"video_tts_script_{platform}", str(layout.video_voice_tts_script_path(platform)))
 
         invalidate_from_step(topic_root, "build_video_package", reason="video scripts regenerated")
         set_step(
@@ -1183,7 +1479,7 @@ def main() -> int:
     parser.add_argument("--publish-dry-run", action="store_true")
     parser.add_argument("--article-style", default="")
     parser.add_argument("--voice-name", default="日常松弛男")
-    parser.add_argument("--voice-speed", type=float, default=1.2)
+    parser.add_argument("--voice-speed", type=float, default=1.08)
     parser.add_argument("--force-export", action="store_true")
     parser.add_argument("--platforms", default="auto")
     parser.add_argument("--target", default="")

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,9 +21,16 @@ from utils import (
 )
 
 
-SERIES_SCRIPT_DIR = Path(
-    "/Users/aki/Development/code/aki-skills/skills/aki-dense-handnote-series/scripts"
-)
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = Path(os.getenv("AKI_SKILLS_REPO_ROOT", "")).expanduser().resolve() if os.getenv("AKI_SKILLS_REPO_ROOT") else SCRIPT_DIR.parents[2]
+SHARED_DIR = REPO_ROOT / "shared"
+if str(SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(SHARED_DIR))
+
+from aki_runtime import skill_path  # noqa: E402
+
+
+SERIES_SCRIPT_DIR = skill_path("aki-dense-handnote-series", "scripts", repo_root_path=REPO_ROOT)
 if str(SERIES_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SERIES_SCRIPT_DIR))
 

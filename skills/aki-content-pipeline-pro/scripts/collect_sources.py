@@ -4,7 +4,12 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 from state import BLOCKED, DONE, FAILED, RUNNING, set_artifact, set_step
@@ -21,19 +26,28 @@ from utils import (
 )
 
 
-DEFAULT_WECHAT_FETCHER = Path(
-    "/Users/aki/Development/code/aki-skills/skills/aki-wechat-fetcher/scripts/fetch.ts"
-)
-DEFAULT_YOUTUBE_RUNNER = Path(
-    "/Users/aki/Development/code/aki-skills/skills/Youtube-clipper-skill/scripts/py"
-)
-DEFAULT_YOUTUBE_DOWNLOAD_SCRIPT = Path(
-    "/Users/aki/Development/code/aki-skills/skills/Youtube-clipper-skill/scripts/download_video.py"
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = Path(os.getenv("AKI_SKILLS_REPO_ROOT", "")).expanduser().resolve() if os.getenv("AKI_SKILLS_REPO_ROOT") else SCRIPT_DIR.parents[2]
+SHARED_DIR = REPO_ROOT / "shared"
+if str(SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(SHARED_DIR))
+
+from aki_runtime import skill_path  # noqa: E402
+
+
+DEFAULT_WECHAT_FETCHER = skill_path("aki-wechat-fetcher", "scripts", "fetch.ts", repo_root_path=REPO_ROOT)
+DEFAULT_YOUTUBE_RUNNER = skill_path("Youtube-clipper-skill", "scripts", "py", repo_root_path=REPO_ROOT)
+DEFAULT_YOUTUBE_DOWNLOAD_SCRIPT = skill_path(
+    "Youtube-clipper-skill",
+    "scripts",
+    "download_video.py",
+    repo_root_path=REPO_ROOT,
 )
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "youtu.be", "www.youtu.be"}
 VTT_TIMECODE_RE = re.compile(
     r"^\d{2}:\d{2}(?::\d{2})?[.,]\d{3}\s+-->\s+\d{2}:\d{2}(?::\d{2})?[.,]\d{3}"
 )
+WECHAT_FETCH_TIMEOUT_SECONDS = 30
 
 
 def _next_index(refs_dir: Path) -> int:
@@ -77,17 +91,41 @@ def _write_pair(refs_dir: Path, idx: int, source_tag: str, raw_text: str) -> tup
     return raw_path, clean_path
 
 
+def _resolve_bun_runner() -> list[str]:
+    for candidate in (
+        os.getenv("BUN_BIN"),
+        os.getenv("BUN_PATH"),
+        str(Path.home() / ".bun" / "bin" / "bun"),
+        "/opt/homebrew/bin/bun",
+        "/usr/local/bin/bun",
+    ):
+        if not candidate:
+            continue
+        path = Path(candidate).expanduser()
+        if path.exists():
+            return [str(path)]
+    if shutil.which("bun"):
+        return ["bun"]
+    return ["npx", "-y", "bun"]
+
+
 def _fetch_wechat_article(url: str, refs_dir: Path, wechat_fetcher: Path, idx: int) -> str:
-    tmp_dir = refs_dir / f"_tmp_fetch_{idx:02d}"
-    ensure_dir(tmp_dir)
-    cmd = ["npx", "-y", "bun", str(wechat_fetcher), url, "--output", str(tmp_dir)]
-    cp = run(cmd)
-    if cp.returncode != 0:
-        raise RuntimeError(f"WeChat fetch failed: {cp.stderr.strip() or cp.stdout.strip()}")
-    md_files = sorted(tmp_dir.glob("*.md"))
-    if not md_files:
-        raise RuntimeError("WeChat fetch produced no markdown file")
-    return md_files[0].read_text(encoding="utf-8", errors="ignore")
+    with tempfile.TemporaryDirectory(prefix=f"aki_pipeline_wechat_{idx:02d}_") as tmp:
+        tmp_dir = Path(tmp)
+        cmd = _resolve_bun_runner() + [str(wechat_fetcher), url, "--output", str(tmp_dir), "--no-images"]
+        try:
+            cp = subprocess.run(cmd, text=True, capture_output=True, timeout=WECHAT_FETCH_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            md_files = sorted(tmp_dir.glob("*.md"))
+            if not md_files:
+                raise RuntimeError(f"WeChat fetch timed out: {url}") from exc
+            return md_files[0].read_text(encoding="utf-8", errors="ignore")
+        if cp.returncode != 0:
+            raise RuntimeError(f"WeChat fetch failed: {cp.stderr.strip() or cp.stdout.strip()}")
+        md_files = sorted(tmp_dir.glob("*.md"))
+        if not md_files:
+            raise RuntimeError("WeChat fetch produced no markdown file")
+        return md_files[0].read_text(encoding="utf-8", errors="ignore")
 
 
 def _build_video_placeholder(url: str) -> str:

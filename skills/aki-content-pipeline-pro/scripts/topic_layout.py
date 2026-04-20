@@ -16,6 +16,7 @@ VIDEO_PLATFORM_CONFIG = {
         "dir": "wechat",
         "label": "wechat_video",
         "voice_script": "voice_wechat_video.md",
+        "voice_tts_script": "voice_wechat_video_tts.md",
         "draft_suffix": "_wechat",
         "display": "微信视频号",
         "adaptive_source_label": "wechat_video",
@@ -24,6 +25,7 @@ VIDEO_PLATFORM_CONFIG = {
         "dir": "xiaohongshu",
         "label": "xhs_video",
         "voice_script": "voice_xhs_video.md",
+        "voice_tts_script": "voice_xhs_video_tts.md",
         "draft_suffix": "_xhs",
         "display": "小红书视频",
         "adaptive_source_label": "xhs_video",
@@ -32,6 +34,7 @@ VIDEO_PLATFORM_CONFIG = {
         "dir": "douyin",
         "label": "douyin_video",
         "voice_script": "voice_douyin_video.md",
+        "voice_tts_script": "voice_douyin_video_tts.md",
         "draft_suffix": "_douyin",
         "display": "抖音视频",
         "adaptive_source_label": "douyin_video",
@@ -133,6 +136,9 @@ class TopicLayout:
 
     def video_voice_script_path(self, platform: str) -> Path:
         return self.video_platform_dir(platform) / VIDEO_PLATFORM_CONFIG[platform]["voice_script"]
+
+    def video_voice_tts_script_path(self, platform: str) -> Path:
+        return self.video_platform_dir(platform) / VIDEO_PLATFORM_CONFIG[platform]["voice_tts_script"]
 
     def video_output_dir(self, platform: str) -> Path:
         return self.video_platform_dir(platform) / "output"

@@ -5,17 +5,28 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from state import DONE, FAILED, RUNNING, set_artifact, set_step
 from utils import run
 
 
-WECHAT_ARTICLE = Path(
-    "/Users/aki/Development/code/aki-skills/skills/aki-post-to-wechat/scripts/wechat-article.ts"
-)
-WECHAT_IMAGEPOST_BROWSER = Path(
-    "/Users/aki/Development/code/aki-skills/skills/aki-post-to-wechat/scripts/wechat-browser.ts"
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = Path(os.getenv("AKI_SKILLS_REPO_ROOT", "")).expanduser().resolve() if os.getenv("AKI_SKILLS_REPO_ROOT") else SCRIPT_DIR.parents[2]
+SHARED_DIR = REPO_ROOT / "shared"
+if str(SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(SHARED_DIR))
+
+from aki_runtime import default_publish_profile, skill_path  # noqa: E402
+
+
+WECHAT_ARTICLE = skill_path("aki-post-to-wechat", "scripts", "wechat-article.ts", repo_root_path=REPO_ROOT)
+WECHAT_IMAGEPOST_BROWSER = skill_path(
+    "aki-post-to-wechat",
+    "scripts",
+    "wechat-browser.ts",
+    repo_root_path=REPO_ROOT,
 )
 
 
@@ -105,7 +116,7 @@ def main() -> int:
     parser.add_argument("--topic-root", required=True)
     parser.add_argument(
         "--profile",
-        default=str(Path.home() / ".local" / "share" / "wechat-browser-profile"),
+        default=str(default_publish_profile()),
         help="Chrome profile directory",
     )
     parser.add_argument("--article-markdown", default="mp_weixin/article/wechat_article.md")

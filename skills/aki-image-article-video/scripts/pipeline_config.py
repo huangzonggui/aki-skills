@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,17 +11,28 @@ from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_ROOT = SCRIPT_DIR.parent
-REPO_ROOT = SKILL_ROOT.parent.parent
 DEFAULTS_FILE = SKILL_ROOT / "config" / "defaults.json"
+REPO_ROOT = Path(os.getenv("AKI_SKILLS_REPO_ROOT", "")).expanduser().resolve() if os.getenv("AKI_SKILLS_REPO_ROOT") else SKILL_ROOT.parent.parent
+SHARED_DIR = REPO_ROOT / "shared"
+if str(SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(SHARED_DIR))
+
+from aki_runtime import default_ai_keys_env_path, default_jianying_projects_root, repo_root  # noqa: E402
 
 
-FALLBACK_DEFAULTS = {
-    "jy_projects_root_default": "/Users/aki/Movies/JianyingPro/User Data/Projects/com.lveditor.draft",
-    "ai_keys_env_path_default": "/Users/aki/.config/ai/keys.env",
-    "voice_profile_path_default": "skills/aki-image-article-video/.local/voice_profiles.json",
-    "jy_cache_music_dir_default": "/Users/aki/Movies/JianyingPro/User Data/Cache/music",
-    "runtime_reports_dir_default": "skills/aki-image-article-video/.local/runtime_reports",
-}
+def _repo_root() -> Path:
+    return repo_root(SCRIPT_DIR)
+
+
+def _fallback_defaults() -> dict[str, str]:
+    root = _repo_root()
+    return {
+        "jy_projects_root_default": str(default_jianying_projects_root(repo_root_path=root)),
+        "ai_keys_env_path_default": str(default_ai_keys_env_path()),
+        "voice_profile_path_default": "skills/aki-image-article-video/.local/voice_profiles.json",
+        "jy_cache_music_dir_default": "skills/aki-image-article-video/.local/jianying_cache/music",
+        "runtime_reports_dir_default": "skills/aki-image-article-video/.local/runtime_reports",
+    }
 
 
 def _resolve_path(raw: str) -> Path:
@@ -28,19 +40,34 @@ def _resolve_path(raw: str) -> Path:
     if p.is_absolute():
         return p
     if raw.startswith("skills/"):
-        return (REPO_ROOT / raw).resolve()
+        return (_repo_root() / raw).resolve()
     return (SKILL_ROOT / raw).resolve()
 
 
+def _should_keep_path_override(value: str) -> bool:
+    if sys.platform != "darwin" and value.startswith("/Users/"):
+        return False
+    if sys.platform == "darwin" and value.startswith("/srv/"):
+        return False
+    return True
+
+
 def _load_defaults_json() -> dict[str, Any]:
+    fallback = _fallback_defaults()
     if not DEFAULTS_FILE.exists():
-        return dict(FALLBACK_DEFAULTS)
+        return dict(fallback)
     try:
         data = json.loads(DEFAULTS_FILE.read_text(encoding="utf-8"))
     except Exception:
         data = {}
-    merged = dict(FALLBACK_DEFAULTS)
-    merged.update({k: v for k, v in data.items() if isinstance(v, str) and v.strip()})
+    merged = dict(fallback)
+    for key, value in data.items():
+        if not isinstance(value, str) or not value.strip():
+            continue
+        if key in {"jy_projects_root_default", "ai_keys_env_path_default", "jy_cache_music_dir_default"}:
+            if not _should_keep_path_override(value):
+                continue
+        merged[key] = value
     return merged
 
 
@@ -78,4 +105,3 @@ def load_pipeline_config(overrides: dict[str, str] | None = None) -> PipelineCon
     )
     cfg.ensure_local_dirs()
     return cfg
-

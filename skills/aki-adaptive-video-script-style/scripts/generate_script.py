@@ -5,21 +5,29 @@ import argparse
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any
 from urllib.request import Request, urlopen
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = Path(os.getenv("AKI_SKILLS_REPO_ROOT", "")).expanduser().resolve() if os.getenv("AKI_SKILLS_REPO_ROOT") else SCRIPT_DIR.parents[2]
+SHARED_DIR = REPO_ROOT / "shared"
+if str(SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(SHARED_DIR))
+
+from aki_runtime import default_ai_keys_env_path, default_private_script_asset_root  # noqa: E402
+
+
 COMFLY_CONFIG = Path.home() / ".config" / "comfly" / "config"
-KEYS_ENV = Path("/Users/aki/.config/ai/keys.env")
+KEYS_ENV = default_ai_keys_env_path()
 DEFAULT_BASE = "https://ai.comfly.chat"
 CHAT_PATH = "/v1/chat/completions"
 DEFAULT_MODEL = "gemini-3-pro-preview-thinking"
 FALLBACK_MODEL = "gpt-5-chat-latest"
-STYLE_REF = Path(__file__).resolve().parents[1] / "references" / "style-rules.md"
-PRIVATE_SCRIPT_ASSET_ROOT = Path(
-    "/Users/aki/Documents/ObsidianVaults/Aki数字资产/02-IP个人话题/口播脚本资产"
-)
+STYLE_REF = SCRIPT_DIR.parents[1] / "references" / "style-rules.md"
+PRIVATE_SCRIPT_ASSET_ROOT = default_private_script_asset_root()
 PRIVATE_SCRIPT_RULE_FILES = ("个人口播偏好.md", "script_preferences.md")
 PRIVATE_SCRIPT_SAMPLE_DIRS = ("style_samples", "current_topic_refs")
 PRIVATE_SCRIPT_SAMPLE_LIMIT = 5
@@ -268,13 +276,71 @@ def _read_private_script_rules() -> str:
     return "\n\n".join(parts).strip()
 
 
+def _normalize_fallback_line(line: str) -> str:
+    s = line.strip()
+    if not s:
+        return ""
+    if re.match(r"^(平台说明|当前段落类型|目标时长|来源标识|当前段落素材如下)\s*[:：]", s):
+        return ""
+    if re.match(r"^全局分页预览\s*[:：]?$", s):
+        return ""
+    if s.startswith("请只围绕当前图片绑定的内容写这一段口播"):
+        return ""
+    page_match = re.match(r"^Page\s*\d+\s*[:：]\s*(.+)$", s, flags=re.IGNORECASE)
+    if page_match:
+        return page_match.group(1).strip()
+    if re.match(r"^(全局标题|当前段落主题|封面图绑定整条内容的总标题)\s*[:：]", s):
+        return re.split(r"[:：]", s, maxsplit=1)[1].strip()
+    return s
+
+
+def _select_fallback_hook_source(pieces: list[str]) -> str:
+    lines = [line.strip() for piece in pieces for line in piece.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    first = lines[0]
+    if len(re.sub(r"\s+", "", first)) > 24:
+        for candidate in lines[1:]:
+            if candidate and candidate != first:
+                return candidate
+    return first
+
+
+def _compress_hook_source(text: str, max_chars: int) -> str:
+    source = re.sub(r"\s+", " ", text).strip()
+    if not source or len(source) <= max_chars:
+        return source
+
+    candidates: list[str] = []
+    if "是" in source:
+        suffix = source.split("是", 1)[1].strip()
+        if suffix:
+            candidates.append(suffix)
+    for sep in ("：", "，", "。"):
+        if sep in source:
+            suffix = source.split(sep, 1)[1].strip()
+            if suffix:
+                candidates.append(suffix)
+    for candidate in candidates:
+        if len(candidate) <= max_chars:
+            return candidate
+    return source
+
+
 def _fallback_script(text: str, target_sec: int, source_label: str = "") -> str:
     lo, hi = _target_char_range(target_sec)
     body = _strip_markdown_noise(text)
-    pieces = [p.strip() for p in re.split(r"\n{2,}", body) if p.strip()]
+    raw_pieces = [p.strip() for p in re.split(r"\n{2,}", body) if p.strip()]
+    pieces: list[str] = []
+    for piece in raw_pieces:
+        lines = [_normalize_fallback_line(line) for line in piece.splitlines()]
+        lines = [line for line in lines if line]
+        if lines:
+            pieces.append("\n".join(lines))
     lines: list[str] = []
     if pieces:
-        hook = _spoken_clip(pieces[0], 42)
+        hook_source = _compress_hook_source(_select_fallback_hook_source(pieces), max(8, min(42, hi)))
+        hook = _spoken_clip(hook_source, 42)
         if hook:
             lines.append(hook.rstrip("。") + "。")
 
@@ -458,8 +524,10 @@ def main() -> int:
     for item in attempts:
         try:
             raw = chat_complete(system_prompt, user_prompt, model_override=item)
-            final_text = _post_process_script(raw, target_sec)
-            break
+            processed = _post_process_script(raw, target_sec)
+            if processed.strip():
+                final_text = processed
+                break
         except Exception:
             continue
 
