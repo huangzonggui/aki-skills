@@ -4,6 +4,7 @@ import importlib.util
 import json
 import tempfile
 from pathlib import Path
+from subprocess import CompletedProcess
 from unittest import mock
 
 
@@ -101,3 +102,34 @@ def test_handle_prompt_approval_runs_second_gate_flow() -> None:
 
         flow_mock.assert_called_once_with(topic_root)
         assert result["current_step"] == "build_video_package"
+
+
+def test_run_start_flow_accepts_blocking_core_note_exit_code() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base = Path(tmpdir)
+        topics_root = base / "topics"
+        topics_root.mkdir()
+        topic_root = topics_root / "1. Demo-20260420-1000"
+        topic_root.mkdir()
+
+        orch = chat_orchestrator.ChatPipelineOrchestrator(
+            session_store=base / "sessions.json",
+            topics_root=topics_root,
+        )
+
+        intake_path = topic_root / "refs" / "chat_intake.md"
+        intake_path.parent.mkdir(parents=True, exist_ok=True)
+        intake_path.write_text("x", encoding="utf-8")
+
+        side_effects = [
+            CompletedProcess(args=[], returncode=0, stdout=str(topic_root) + "\n", stderr=""),
+            CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            CompletedProcess(args=[], returncode=2, stdout=str(topic_root / "core_note.md") + "\n", stderr=""),
+        ]
+
+        with mock.patch.object(chat_orchestrator, "append_chat_intake", return_value=intake_path):
+            with mock.patch.object(orch, "_run_pipeline", side_effect=side_effects):
+                result = orch._run_start_flow("demo", "wechat", "aki")
+
+        assert result == topic_root.resolve()
