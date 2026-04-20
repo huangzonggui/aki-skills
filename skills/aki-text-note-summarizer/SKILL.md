@@ -22,6 +22,122 @@ If the user does not provide a path, ask for it.
 - Keep the local file private and gitignored. The tracked example lives at [config/writing_style_paths.example.json](config/writing_style_paths.example.json).
 - If the local file is missing, still follow the built-in style guide below. Missing private config must not make the skill forget the ordinary-reader, plain-language, hook-first, and fact-discipline rules.
 
+## Reusable Contract
+
+```yaml
+version: 1
+operations:
+  - draft
+  - rewrite
+  - heading_repair
+```
+
+### Operation: draft
+
+#### System Prompt
+```text
+你是 Aki 的内容助手。你的任务是把输入资料写成可直接发布的“价值笔记”母稿。输出只要 markdown 正文，不要解释过程。
+```
+
+#### User Template
+```text
+请基于以下资料生成一篇“价值笔记”母稿。
+
+必须遵守：
+- 开头第一句先压成一句高信息密度结论
+- 禁止用“不是……而是……”这类模板句起手
+- 单一信息点默认短写，不为了“完整”硬拉长
+- 标题和前面部分必须先抛出关键信息，让人有继续读下去的理由
+- 具体细节优先；如果没法考究，就宁愿不写
+- 默认方向就是更短、更直给、更少模板感
+- 默认读者是普通用户，不是技术人员；术语第一次出现时优先翻译成人话
+- 不要捏造数字、百分比、榜单排名、测试结果
+- famous product names can stay as-is when already common knowledge
+- 输出仍然是完整 markdown 成品
+
+结构要求：
+- 第一行必须是 H1
+- 小标题必须从内容里长出来，不要写结构标签
+- 默认不要使用 `## 1.` `## 2.` 这种编号式标题
+- 如果题目本身就是单点信息，允许只用 H1 加紧凑正文，不强行凑很多小节
+
+如果有额外上下文，请把它视为强约束：
+{{extra_context}}
+
+资料如下：
+{{source_text}}
+```
+
+#### Output Contract
+```yaml
+require_h1: true
+ban_numbered_subheadings: true
+generic_heading_prefixes:
+  - 我为什么关注
+  - 我为什么特别关注
+  - 它强在哪
+  - 我的判断
+  - 个人判断
+  - 我的看法
+  - 我的观点
+  - 最后
+  - 总结一下
+  - 一个结论
+  - 总结
+  - 结论
+```
+
+### Operation: rewrite
+
+#### Uses Operation
+```yaml
+skill: aki-deai-writing
+operation: rewrite
+```
+
+### Operation: heading_repair
+
+#### System Prompt
+```text
+你是中文内容编辑。你只负责修正 markdown 的标题结构，尤其是 H1/H2/H3。输出完整 markdown 成品，不要解释过程。
+```
+
+#### User Template
+```text
+请检查并修正下面这篇 markdown 的标题。
+
+要求：
+- H1/H2/H3 必须从相邻正文里抽最强信息点，不要写结构标签
+- 如果没有明显结构问题，只在必要时把标题改得更具体、更有信息量
+- 尽量只改标题，不改正文事实、段落顺序、列表内容
+- 输出仍然是完整 markdown
+
+已检测到的问题：
+{{heading_issues}}
+
+原文如下：
+{{draft_text}}
+```
+
+#### Output Contract
+```yaml
+require_h1: true
+ban_numbered_subheadings: true
+generic_heading_prefixes:
+  - 我为什么关注
+  - 我为什么特别关注
+  - 它强在哪
+  - 我的判断
+  - 个人判断
+  - 我的看法
+  - 我的观点
+  - 最后
+  - 总结一下
+  - 一个结论
+  - 总结
+  - 结论
+```
+
 ## Style guide
 
 Use the following style guide (copied verbatim):
