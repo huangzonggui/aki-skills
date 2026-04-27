@@ -35,9 +35,18 @@ from image_provider import (  # noqa: E402
 
 
 DEFAULT_UNIT_COST_CNY = 0.6
-DOUYIN_SAFE_CANVAS_SIZE = (1080, 1920)
-DOUYIN_SAFE_CONTENT_SCALE = 0.84
-DOUYIN_SAFE_BACKGROUND = (255, 255, 255)
+DOUYIN_IMAGE_PROFILE = "douyin_series_safe_84"
+DOUYIN_ASPECT_RATIO = "9:16"
+DOUYIN_PROFILE_PROMPT = """
+
+Douyin vertical series render parameters:
+- Generate this image as a Douyin short-video series image.
+- Canvas aspect ratio must be 9:16.
+- Background must stay pure white (#FFFFFF).
+- Keep the complete visual composition inside the centered 84% safe content area.
+- Leave plain white bleed on all four edges; the outer edge band must contain no titles, body text, icons, arrows, annotations, or key information.
+- Do not draw crop marks, safe-zone guide lines, phone UI, Douyin UI, platform logo, or border frame.
+""".strip()
 
 
 def _extract_prompt_title(path: Path) -> str:
@@ -107,47 +116,20 @@ def _collect_prompt_files(layout) -> tuple[Path | None, list[Path]]:
     return (cover if cover.exists() else None), series
 
 
-def _write_douyin_safe_jpg(
-    original_png_path: Path,
-    publish_jpg_path: Path,
-    *,
-    canvas_size: tuple[int, int] = DOUYIN_SAFE_CANVAS_SIZE,
-    content_scale: float = DOUYIN_SAFE_CONTENT_SCALE,
-) -> Path:
-    try:
-        from PIL import Image
-    except ImportError as exc:  # pragma: no cover - depends on runtime image stack
-        raise RuntimeError("Pillow is required to write Douyin 9:16 safe-bleed images") from exc
-
-    if not 0 < content_scale <= 1:
-        raise ValueError("content_scale must be between 0 and 1")
-
-    canvas_w, canvas_h = canvas_size
-    max_w = max(1, round(canvas_w * content_scale))
-    max_h = max(1, round(canvas_h * content_scale))
-    publish_jpg_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with Image.open(original_png_path) as raw:
-        image = raw.convert("RGBA")
-        scale = min(max_w / image.width, max_h / image.height)
-        resized_size = (
-            max(1, round(image.width * scale)),
-            max(1, round(image.height * scale)),
-        )
-        resample = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
-        resized = image.resize(resized_size, resample)
-        canvas = Image.new("RGB", canvas_size, DOUYIN_SAFE_BACKGROUND)
-        offset = ((canvas_w - resized.width) // 2, (canvas_h - resized.height) // 2)
-        canvas.paste(resized, offset, resized)
-        canvas.save(publish_jpg_path, format="JPEG", quality=90, optimize=True)
-    return publish_jpg_path
-
-
-def _write_publish_jpg(original_png_path: Path, publish_jpg_path: Path, *, platform: str = "") -> Path:
-    if platform == "douyin":
-        return _write_douyin_safe_jpg(original_png_path, publish_jpg_path)
+def _write_publish_jpg(original_png_path: Path, publish_jpg_path: Path) -> Path:
     convert_image_to_jpg(original_png_path, publish_jpg_path)
     return publish_jpg_path
+
+
+def _build_image_request(prompt_text: str, output_path: Path, platform: str) -> ImageRenderRequest:
+    if platform != "douyin":
+        return ImageRenderRequest(prompt=prompt_text, output_path=output_path)
+    return ImageRenderRequest(
+        prompt=f"{prompt_text.rstrip()}\n\n{DOUYIN_PROFILE_PROMPT}\n",
+        output_path=output_path,
+        aspect_ratio=DOUYIN_ASPECT_RATIO,
+        profile=DOUYIN_IMAGE_PROFILE,
+    )
 
 
 def _render_platform_images(layout, platform: str, router) -> dict[str, Any]:
@@ -169,7 +151,7 @@ def _render_platform_images(layout, platform: str, router) -> dict[str, Any]:
         prompt_text = cover_prompt.read_text(encoding="utf-8", errors="ignore").strip()
         if not prompt_text:
             raise RuntimeError(f"Prompt file is empty: {cover_prompt}")
-        requests.append(ImageRenderRequest(prompt=prompt_text, output_path=cover_png))
+        requests.append(_build_image_request(prompt_text, cover_png, platform))
         publish_targets.append((cover_png, cover_jpg))
     for idx, prompt_path in enumerate(series_prompts, start=1):
         out_png = originals_dir / f"series_{idx:02d}.png"
@@ -177,12 +159,12 @@ def _render_platform_images(layout, platform: str, router) -> dict[str, Any]:
         prompt_text = prompt_path.read_text(encoding="utf-8", errors="ignore").strip()
         if not prompt_text:
             raise RuntimeError(f"Prompt file is empty: {prompt_path}")
-        requests.append(ImageRenderRequest(prompt=prompt_text, output_path=out_png))
+        requests.append(_build_image_request(prompt_text, out_png, platform))
         publish_targets.append((out_png, out_jpg))
 
     batch_result: ImageBatchResult = router.render_batch(requests)
     for original_png, publish_jpg in publish_targets:
-        _write_publish_jpg(original_png, publish_jpg, platform=platform)
+        _write_publish_jpg(original_png, publish_jpg)
 
     result: dict[str, Any] = {
         "png": len(batch_result.rendered_images),
@@ -193,11 +175,10 @@ def _render_platform_images(layout, platform: str, router) -> dict[str, Any]:
         "provider_billed_images": dict(batch_result.provider_billed_images),
     }
     if platform == "douyin":
-        result["publish_postprocess"] = {
-            "name": "douyin_9x16_white_bleed_84",
-            "canvas_size": list(DOUYIN_SAFE_CANVAS_SIZE),
-            "content_scale": DOUYIN_SAFE_CONTENT_SCALE,
-            "background": "#FFFFFF",
+        result["render_profile"] = {
+            "name": DOUYIN_IMAGE_PROFILE,
+            "aspect_ratio": DOUYIN_ASPECT_RATIO,
+            "safe_content_scale": 0.84,
         }
     return result
 

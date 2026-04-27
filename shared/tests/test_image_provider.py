@@ -160,6 +160,47 @@ class ImageRouterTests(unittest.TestCase):
             self.assertTrue(output_path.exists())
             self.assertTrue(output_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
 
+    def test_render_request_overrides_aspect_ratio_per_image(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "out.png"
+            configs = {
+                "openrouter": {
+                    "api_url": "https://openrouter.ai/api/v1/chat/completions",
+                    "api_key": "openrouter-key",
+                    "image_model": "google/gemini-3.1-flash-image-preview",
+                    "aspect_ratio": "3:4",
+                    "image_size": "2K",
+                    "timeout_sec": 90,
+                    "app_name": "",
+                    "site_url": "",
+                }
+            }
+            router = image_provider.ImageRouter(policy="openrouter", configs=configs)
+            seen: dict[str, object] = {}
+
+            def fake_render(prompt: str, output_path: Path, provider: str, config: dict[str, object]):
+                seen["aspect_ratio"] = config["aspect_ratio"]
+                output_path.write_bytes(b"\x89PNG\r\n\x1a\nopenrouter")
+                return image_provider.ImageRenderResult(
+                    output_path=output_path,
+                    provider_used=provider,
+                    image_format="png",
+                )
+
+            with patch.object(image_provider, "render_image_with_provider", side_effect=fake_render):
+                router.render_batch(
+                    [
+                        image_provider.ImageRenderRequest(
+                            prompt="draw this",
+                            output_path=output_path,
+                            aspect_ratio="9:16",
+                            profile="douyin_series_safe_84",
+                        )
+                    ]
+                )
+
+            self.assertEqual(seen["aspect_ratio"], "9:16")
+
     def test_router_falls_back_from_comfly_to_openrouter_and_clears_partial_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)

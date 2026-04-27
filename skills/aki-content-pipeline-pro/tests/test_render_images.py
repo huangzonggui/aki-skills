@@ -4,9 +4,8 @@ import importlib.util
 import json
 import sys
 import tempfile
+from base64 import b64decode
 from pathlib import Path
-
-from PIL import Image
 
 
 SCRIPT_DIR = Path(__file__).resolve().parents[1] / "scripts"
@@ -20,6 +19,11 @@ assert SPEC and SPEC.loader
 SPEC.loader.exec_module(render_images)
 
 
+PNG_BYTES = b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aK3cAAAAASUVORK5CYII="
+)
+
+
 class _FakeRouter:
     def __init__(self, provider_used: str, fallback_triggered: bool) -> None:
         self.provider_used = provider_used
@@ -31,7 +35,7 @@ class _FakeRouter:
         rendered = []
         for request in requests:
             request.output_path.parent.mkdir(parents=True, exist_ok=True)
-            Image.new("RGB", (1080, 1920), (16, 16, 16)).save(request.output_path, format="PNG")
+            request.output_path.write_bytes(PNG_BYTES)
             rendered.append(
                 render_images.ImageRenderResult(
                     output_path=request.output_path,
@@ -63,11 +67,13 @@ def test_render_platform_images_uses_batch_router_and_returns_provider_metadata(
         assert result["original_png"] == 2
         assert result["jpg"] == 2
         assert len(router.last_requests) == 2
+        assert all(request.aspect_ratio == "" for request in router.last_requests)
+        assert all(request.profile == "" for request in router.last_requests)
         assert (layout.platform_images_dir("wechat") / "cover_01.jpg").exists()
         assert (layout.platform_original_images_dir("wechat") / "series_01.png").exists()
 
 
-def test_render_platform_images_writes_douyin_9x16_safe_bleed_jpg() -> None:
+def test_render_platform_images_passes_douyin_profile_to_image_provider() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         topic_root = Path(tmpdir)
         layout = render_images.resolve_layout(topic_root)
@@ -77,13 +83,12 @@ def test_render_platform_images_writes_douyin_9x16_safe_bleed_jpg() -> None:
 
         result = render_images._render_platform_images(layout, "douyin", router)
 
-        publish_jpg = layout.platform_images_dir("douyin") / "cover_01.jpg"
-        with Image.open(publish_jpg) as image:
-            assert image.size == (1080, 1920)
-            assert image.getpixel((10, 10)) == (255, 255, 255)
-            assert image.getpixel((540, 960))[0] < 80
-        assert result["publish_postprocess"]["content_scale"] == 0.84
-        assert result["publish_postprocess"]["canvas_size"] == [1080, 1920]
+        assert router.last_requests[0].aspect_ratio == "9:16"
+        assert router.last_requests[0].profile == "douyin_series_safe_84"
+        assert "84% safe content area" in router.last_requests[0].prompt
+        assert (layout.platform_images_dir("douyin") / "cover_01.jpg").exists()
+        assert result["render_profile"]["name"] == "douyin_series_safe_84"
+        assert result["render_profile"]["aspect_ratio"] == "9:16"
 
 
 def test_write_cost_summary_includes_provider_metadata() -> None:

@@ -30,6 +30,9 @@ TRANSIENT_HTTP_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 class ImageRenderRequest:
     prompt: str
     output_path: Path
+    aspect_ratio: str = ""
+    image_size: str = ""
+    profile: str = ""
 
 
 @dataclass(frozen=True)
@@ -717,8 +720,20 @@ class ImageRouter:
         config = self.configs[provider]
         rendered: list[ImageRenderResult] = []
         for request in requests:
+            request_config = dict(config)
+            if request.aspect_ratio:
+                request_config["aspect_ratio"] = request.aspect_ratio
+            if request.image_size:
+                request_config["image_size"] = request.image_size
             try:
-                rendered.append(render_image_with_provider(request.prompt, request.output_path, provider, config))
+                rendered.append(
+                    render_image_with_provider(
+                        request.prompt,
+                        request.output_path,
+                        provider,
+                        request_config,
+                    )
+                )
             except ImageProviderError as exc:
                 exc.billed_images += len(rendered)
                 raise

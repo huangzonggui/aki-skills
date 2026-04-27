@@ -297,22 +297,24 @@ python scripts/pipeline.py --intent publish_wechat_drafts --topic-root "<topic_r
 13. 如果某个平台图片质量不合格，返工时应只重跑该平台的生图；不要把其他平台图片直接拷过去顶替。
 14. 视频脚本优先用普通人能直接听懂的话，不要堆“长链路、工具协同、全链路、上下文管理”这类抽象词；能翻成人话就先翻成人话。
 15. 目录按需懒创建：`init_topic` 只创建话题根目录和写入状态所需的 `meta/`；`refs/`、`copies/`、`prompts/`、`images/`、`video/` 只有在对应步骤真正写文件时才创建，返工后也不要重新铺空目录。
-16. 抖音图片必须额外生成发布安全版：`images/douyin/*.jpg` 固定为 `1080x1920` 的 `9:16` 纯白画布，模型原图整体等比缩进到画布 `84%` 内容区内，四边留下白边出血；平台裁掉白边可以接受，但不能裁到正文、标题、图标和核心信息。模型原图仍保留在 `images/douyin/originals/*.png`，本地安全版不计入生图成本。
+16. 抖音图片规则必须发生在生图调用入口：当 `render_images` 的平台列表包含 `douyin` 时，给底层生图请求传入 `douyin_series_safe_84` profile，并把请求参数 `aspect_ratio` 设为 `9:16`；平台列表不包含 `douyin` 时，不要发起任何抖音系列图片请求，也不要附加抖音 profile。
 
-## 抖音图片安全出血规则
+## 抖音系列生图参数
 
-当 `render_images` 渲染 `douyin` 平台时，默认输出两类文件：
+`aki-content-pipeline-pro` 是创作编排 skill。它先通过 `aki-dense-handnote-series` 生成统一分页和统一 prompt，再由 `render_images` 按平台把审核后的 prompt 传给底层生图能力。
 
-1. `images/douyin/originals/*.png`：模型直接生成的原图，只做留档。
-2. `images/douyin/*.jpg`：真正用于抖音 / 剪映 / 短视频封面的发布图。
+当本次确实要生成抖音系列图片时，`render_images` 必须在调用生图前附加以下参数，而不是在成图后再本地修图：
 
-发布图必须满足：
+1. `profile`: `douyin_series_safe_84`
+2. `aspect_ratio`: `9:16`
+3. prompt 追加抖音安全出血要求：纯白背景、完整构图放在居中的 `84%` 安全内容区内，四边保留纯白出血，标题、正文、图标、箭头、标注和核心信息都不得进入外侧边缘区域。
 
-1. 画布比例固定 `9:16`，尺寸固定 `1080x1920`。
-2. 背景固定纯白 `#FFFFFF`，四边都是白边出血。
-3. 原图完整保留，不裁剪、不拉伸，居中等比缩放。
-4. 默认内容缩放比例为 `84%`：内容最多占 `907x1613`，如果原图本身是 `9:16`，四边约为左右 `86px`、上下 `154px` 的安全白边。
-5. 下游做抖音视频或封面时，优先使用 `images/douyin/*.jpg`，不要直接拿 `originals/` 里的模型原图。
+输出仍按平台目录管理：
+
+1. `images/douyin/originals/*.png`：抖音 profile 下由模型直接生成的原图。
+2. `images/douyin/*.jpg`：同一张模型图的 JPG 转换版，方便下游剪映 / 发布链路读取。
+
+不要把微信或小红书图片复制到抖音目录，也不要用本地后处理伪造抖音安全版来替代抖音 profile 生图。
 
 ## 返工
 
