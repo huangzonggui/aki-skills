@@ -35,7 +35,7 @@ def main() -> int:
 
     topic_root.mkdir(parents=True, exist_ok=False)
     layout = resolve_layout(topic_root)
-    layout.ensure_structure()
+    layout.meta_dir.mkdir(parents=True, exist_ok=True)
 
     topic_meta = {
         "title": args.title.strip(),

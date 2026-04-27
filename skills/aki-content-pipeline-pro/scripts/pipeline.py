@@ -1052,6 +1052,7 @@ def intent_derive_platform_copies(args: argparse.Namespace) -> int:
             logic_mode=args.logic_mode,
         )
 
+        layout.copies_dir.mkdir(parents=True, exist_ok=True)
         layout.wechat_article_path.write_text(text + "\n", encoding="utf-8")
 
         imagepost_title = _extract_h1_title(text, fallback=plan.get("title") or "微信图文")
@@ -1437,7 +1438,7 @@ def intent_rework(args: argparse.Namespace) -> int:
             path.unlink()
         else:
             shutil.rmtree(path)
-    layout.ensure_structure()
+    layout.meta_dir.mkdir(parents=True, exist_ok=True)
     print(f"Rework prepared for target: {normalized}")
     return 0
 
