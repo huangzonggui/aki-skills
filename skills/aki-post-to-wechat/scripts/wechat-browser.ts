@@ -22,6 +22,7 @@ type WechatBrowserErrorCode =
   | 'MENU_NOT_FOUND'
   | 'TOKEN_MISMATCH_TAB'
   | 'IMAGEPOST_EDITOR_NOT_READY'
+  | 'LEGACY_IMAGEPOST_FLOW'
   | 'INTENT_MISMATCH'
   | 'UPLOAD_INPUT_NOT_FOUND';
 
@@ -226,6 +227,10 @@ function isStrictImagepostEditorState(state: ImagepostEditorState, url: string):
   return IMAGEPOST_TYPE_HINT_RE.test(String(url || '')) && state.titleInput;
 }
 
+function isTrueStickerFlowState(state: ImagepostEditorState | null | undefined): boolean {
+  return !!state?.topImage;
+}
+
 async function detectImagepostEditorState(
   cdp: CdpConnection,
   sessionId: string,
@@ -264,6 +269,21 @@ async function waitForImagepostEditorReady(
     await sleep(700);
   }
   return null;
+}
+
+async function waitForTrueStickerFlow(
+  cdp: CdpConnection,
+  sessionId: string,
+  timeoutMs = 12_000,
+): Promise<ImagepostEditorState | null> {
+  const start = Date.now();
+  let lastState: ImagepostEditorState | null = null;
+  while (Date.now() - start < timeoutMs) {
+    lastState = await detectImagepostEditorState(cdp, sessionId);
+    if (isTrueStickerFlowState(lastState)) return lastState;
+    await sleep(700);
+  }
+  return lastState;
 }
 
 async function waitForAnySelector(
@@ -2545,95 +2565,57 @@ export async function postToWeChat(options: WeChatBrowserOptions): Promise<void>
       failWithCode('INTENT_MISMATCH', `Mode lock violation: expected imagepost intent, got ${intent}`);
     }
 
+    const stickerFlowState = await waitForTrueStickerFlow(cdp, sessionId, 10_000);
+    const flow = stickerFlowState || imagepostState;
+    if (!isTrueStickerFlowState(stickerFlowState)) {
+      console.error(`[wechat-browser] Rejecting non-sticker imagepost shell: topImage=${flow.topImage}, legacyCover=${flow.legacyCover}, editorInsert=${flow.editorInsert}`);
+      await dumpComposeDiagnostics(cdp, sessionId);
+      failWithCode(
+        'LEGACY_IMAGEPOST_FLOW',
+        `Imagepost opened legacy/article-like editor shell instead of sticker flow (topImage=${flow.topImage}, legacyCover=${flow.legacyCover}, editorInsert=${flow.editorInsert}). Aborting before upload/save.`,
+      );
+    }
+
     console.log('[wechat-browser] Uploading all images at once...');
     const absolutePaths = prepareUploadFriendlyImages(images);
     console.log(`[wechat-browser] Images: ${absolutePaths.join(', ')}`);
     await debugDumpUploadArea(cdp, sessionId, 'before-click');
-    const flow = imagepostState;
-    // Some accounts expose "贴图" menu label but still land on legacy cover/editor flow.
-    // Use DOM capability as source of truth to avoid forcing top-image upload on unsupported pages.
-    const isStickerFlow = flow.topImage;
+    const isStickerFlow = true;
     console.log(`[wechat-browser] Flow detection: menu=${selectedMenuLabel}, topImage=${flow.topImage}, legacyCover=${flow.legacyCover}, editorInsert=${flow.editorInsert}, stickerFlow=${isStickerFlow}`);
 
-    if (isStickerFlow) {
-      // 贴图页面：图片必须通过 #js_content_top 的 image-selector 上传。
-      const topReady = await waitForAnySelector(cdp, sessionId, [
-        '#js_content_top .image-selector',
-        '#js_content_top input[type=file]',
-      ], 20_000);
-      if (!topReady) {
-        console.warn('[wechat-browser] Sticker upload area not detected after wait; continuing anyway...');
-      }
-      await clickBySelectors(cdp, sessionId, [
-        '#js_content_top .image-selector__add',
-        '#js_content_top .image-selector .js_upload_btn_container',
-        '#js_content_top .image-selector .pop-opr__button',
-        '#js_content_top .js_upload_btn_container',
-      ], 'top image upload entry');
-      await clickVisibleByText(cdp, sessionId, ['本地上传'], { exact: true, maxTextLen: 12 });
-      await clickVisibleByText(cdp, sessionId, ['本地上传'], { maxTextLen: 32 });
-      await sleep(300);
-    } else {
-      // 图文页面：先激活编辑器，再点击图片入口并选择本地上传。
-      await clickBySelectors(cdp, sessionId, [
-        '.js_pmEditorArea',
-        '.ProseMirror',
-        '[contenteditable="true"]',
-        '#js_editor',
-      ], 'editor area');
-      await sleep(250);
-      await clickBySelectors(cdp, sessionId, [
-        '#js_editor_insertimage',
-        '.jsInsertIcon',
-        '.icon20_common.add_image',
-        '.js_editor_insertphoto',
-        '.js_upload_btn_container',
-      ], 'insert image entry');
-      await sleep(300);
-
-      await clickBySelectors(cdp, sessionId, [
-        '#js_cover_description_area .js_cover_btn_area',
-        '#js_cover_description_area .select-cover__btn',
-        '#js_cover_description_area .js_chooseCover',
-        '#js_cover_description_area .js_modifyCover',
-        '.js_cover_btn_area',
-        '.select-cover__btn',
-      ], 'cover entry');
-      await sleep(350);
-      await clickBySelectors(cdp, sessionId, [
-        '#js_cover_description_area .js_imagedialog',
-        '.js_cover_opr .js_imagedialog',
-        '.js_imagedialog',
-      ], 'cover image dialog');
-      await sleep(350);
-      await clickVisibleByText(cdp, sessionId, ['本地上传'], { exact: true, maxTextLen: 12 });
-      await clickVisibleByText(cdp, sessionId, ['本地上传'], { maxTextLen: 32 });
-      await sleep(350);
+    // 真贴图页：图片必须通过 #js_content_top 的 image-selector 上传。
+    const topReady = await waitForAnySelector(cdp, sessionId, [
+      '#js_content_top .image-selector',
+      '#js_content_top input[type=file]',
+    ], 20_000);
+    if (!topReady) {
+      console.warn('[wechat-browser] Sticker upload area not detected after wait; continuing anyway...');
     }
+    await clickBySelectors(cdp, sessionId, [
+      '#js_content_top .image-selector__add',
+      '#js_content_top .image-selector .js_upload_btn_container',
+      '#js_content_top .image-selector .pop-opr__button',
+      '#js_content_top .js_upload_btn_container',
+    ], 'top image upload entry');
+    await clickVisibleByText(cdp, sessionId, ['本地上传'], { exact: true, maxTextLen: 12 });
+    await clickVisibleByText(cdp, sessionId, ['本地上传'], { maxTextLen: 32 });
+    await sleep(300);
     await debugDumpUploadArea(cdp, sessionId, 'after-click');
 
     let uploadInputNodeIds: number[] = [];
-    if (isStickerFlow) {
-      await waitForAnySelector(cdp, sessionId, [
-        '#js_content_top input[type=file]',
-        '#js_content_top .image-selector input[type=file]',
-      ], 20_000);
+    await waitForAnySelector(cdp, sessionId, [
+      '#js_content_top input[type=file]',
+      '#js_content_top .image-selector input[type=file]',
+    ], 20_000);
+    try {
+      uploadInputNodeIds = await findTopImageFileInputNodeIds(cdp, sessionId);
+    } catch (err) {
+      console.warn(`[wechat-browser] Top uploader input not found (will retry): ${err instanceof Error ? err.message : String(err)}`);
+      await sleep(1200);
       try {
         uploadInputNodeIds = await findTopImageFileInputNodeIds(cdp, sessionId);
-      } catch (err) {
-        console.warn(`[wechat-browser] Top uploader input not found (will retry): ${err instanceof Error ? err.message : String(err)}`);
-        await sleep(1200);
-        try {
-          uploadInputNodeIds = await findTopImageFileInputNodeIds(cdp, sessionId);
-        } catch (err2) {
-          failWithCode('UPLOAD_INPUT_NOT_FOUND', `Top uploader input still not found after retry: ${err2 instanceof Error ? err2.message : String(err2)}`);
-        }
-      }
-    } else {
-      try {
-        uploadInputNodeIds = await findBestFileInputNodeIds(cdp, sessionId);
-      } catch (err) {
-        failWithCode('UPLOAD_INPUT_NOT_FOUND', `Cover/image uploader input not found: ${err instanceof Error ? err.message : String(err)}`);
+      } catch (err2) {
+        failWithCode('UPLOAD_INPUT_NOT_FOUND', `Top uploader input still not found after retry: ${err2 instanceof Error ? err2.message : String(err2)}`);
       }
     }
     for (const nodeId of uploadInputNodeIds) {
@@ -2645,61 +2627,25 @@ export async function postToWeChat(options: WeChatBrowserOptions): Promise<void>
     await dispatchFileInputChange(cdp, sessionId);
 
     console.log('[wechat-browser] Waiting for image upload to complete...');
-    if (isStickerFlow) {
-      await sleep(1200);
-    } else {
-      await waitForImagesUploaded(cdp, sessionId, absolutePaths.length);
-    }
+    await sleep(1200);
     let uploadIssue = await detectImageUploadIssue(cdp, sessionId);
-    let coverReady = await verifyCoverReady(cdp, sessionId);
-    let topImageReady = isStickerFlow ? await waitForTopImageReady(cdp, sessionId, 18_000) : false;
-    if (uploadIssue || (isStickerFlow && !topImageReady)) {
+    let topImageReady = await waitForTopImageReady(cdp, sessionId, 18_000);
+    if (uploadIssue || !topImageReady) {
       const reason = uploadIssue ? `warning=${uploadIssue}` : 'top-image-not-ready';
       console.warn(`[wechat-browser] Upload retry triggered (${reason}). Retrying upload once...`);
-      if (isStickerFlow) {
-        await clickBySelectors(cdp, sessionId, [
-          '#js_content_top .image-selector__add',
-          '#js_content_top .image-selector .js_upload_btn_container',
-          '#js_content_top .image-selector .pop-opr__button',
-          '#js_content_top .js_upload_btn_container',
-        ], 'top image upload entry retry');
-        await clickVisibleByText(cdp, sessionId, ['本地上传'], { exact: true, maxTextLen: 12 });
-        await clickVisibleByText(cdp, sessionId, ['本地上传'], { maxTextLen: 32 });
-        await sleep(300);
-        try {
-          uploadInputNodeIds = await findTopImageFileInputNodeIds(cdp, sessionId);
-        } catch (err) {
-          failWithCode('UPLOAD_INPUT_NOT_FOUND', `Top uploader input missing during retry: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      } else {
-        await clickBySelectors(cdp, sessionId, [
-          '#js_editor_insertimage',
-          '.jsInsertIcon',
-          '.icon20_common.add_image',
-          '.js_editor_insertphoto',
-          '.js_upload_btn_container',
-          '#js_cover_description_area .js_cover_btn_area',
-          '#js_cover_description_area .select-cover__btn',
-          '#js_cover_description_area .js_chooseCover',
-          '#js_cover_description_area .js_modifyCover',
-          '.js_cover_btn_area',
-          '.select-cover__btn',
-        ], 'cover entry retry');
-        await sleep(300);
-        await clickBySelectors(cdp, sessionId, [
-          '#js_cover_description_area .js_imagedialog',
-          '.js_cover_opr .js_imagedialog',
-          '.js_imagedialog',
-        ], 'cover image dialog retry');
-        await sleep(300);
-        await clickVisibleByText(cdp, sessionId, ['本地上传'], { exact: true, maxTextLen: 12 });
-        await clickVisibleByText(cdp, sessionId, ['本地上传'], { maxTextLen: 32 });
-        await sleep(300);
-        try {
-          uploadInputNodeIds = await findBestFileInputNodeIds(cdp, sessionId);
-        } catch (err) {
-          failWithCode('UPLOAD_INPUT_NOT_FOUND', `Cover/image uploader input missing during retry: ${err instanceof Error ? err.message : String(err)}`);
-        }
+      await clickBySelectors(cdp, sessionId, [
+        '#js_content_top .image-selector__add',
+        '#js_content_top .image-selector .js_upload_btn_container',
+        '#js_content_top .image-selector .pop-opr__button',
+        '#js_content_top .js_upload_btn_container',
+      ], 'top image upload entry retry');
+      await clickVisibleByText(cdp, sessionId, ['本地上传'], { exact: true, maxTextLen: 12 });
+      await clickVisibleByText(cdp, sessionId, ['本地上传'], { maxTextLen: 32 });
+      await sleep(300);
+      try {
+        uploadInputNodeIds = await findTopImageFileInputNodeIds(cdp, sessionId);
+      } catch (err) {
+        failWithCode('UPLOAD_INPUT_NOT_FOUND', `Top uploader input missing during retry: ${err instanceof Error ? err.message : String(err)}`);
       }
       for (const nodeId of uploadInputNodeIds) {
         await cdp.send('DOM.setFileInputFiles', {
@@ -2708,16 +2654,11 @@ export async function postToWeChat(options: WeChatBrowserOptions): Promise<void>
         }, { sessionId });
       }
       await dispatchFileInputChange(cdp, sessionId);
-      if (isStickerFlow) {
-        await sleep(1200);
-      } else {
-        await waitForImagesUploaded(cdp, sessionId, absolutePaths.length, 30_000);
-      }
+      await sleep(1200);
       uploadIssue = await detectImageUploadIssue(cdp, sessionId);
-      coverReady = await verifyCoverReady(cdp, sessionId);
-      topImageReady = isStickerFlow ? await waitForTopImageReady(cdp, sessionId, 12_000) : false;
+      topImageReady = await waitForTopImageReady(cdp, sessionId, 12_000);
     }
-    if (isStickerFlow && !topImageReady && absolutePaths.length > 0) {
+    if (!topImageReady && absolutePaths.length > 0) {
       console.warn('[wechat-browser] Top image still not ready, trying clipboard paste fallback...');
       await cdp.send('Page.bringToFront', {}, { sessionId });
       await clickBySelectors(cdp, sessionId, [
@@ -2733,38 +2674,11 @@ export async function postToWeChat(options: WeChatBrowserOptions): Promise<void>
         topImageReady = await waitForTopImageReady(cdp, sessionId, 12_000);
       }
     }
-    if (!isStickerFlow && !coverReady && absolutePaths.length > 0) {
-      console.warn('[wechat-browser] File-input upload not ready, trying clipboard paste fallback...');
-      await cdp.send('Page.bringToFront', {}, { sessionId });
-      await clickBySelectors(cdp, sessionId, [
-        '#js_cover_description_area .js_cover_preview_new',
-        '#js_cover_description_area .js_cover_preview',
-        '#js_cover_description_area .js_cover_btn_area',
-        '#js_cover_description_area .select-cover__btn',
-        '#js_cover_description_area .js_chooseCover',
-        '.js_cover_btn_area',
-        '.select-cover__btn',
-      ], 'cover area for clipboard fallback');
-      await sleep(300);
-      const pasted = pasteImageViaClipboard(absolutePaths[0]!);
-      if (pasted) {
-        await sleep(2500);
-        uploadIssue = await detectImageUploadIssue(cdp, sessionId);
-        coverReady = await verifyCoverReady(cdp, sessionId);
-      }
-    }
     const hasUploadSelection = await hasSelectedUploadFiles(cdp, sessionId);
-    if (!coverReady) {
-      // Give dynamic uploader UI a second chance to render previews.
-      await sleep(1200);
-    }
-    const isLegacyCoverFlow = selectedMenuLabel === '图文' && await hasLegacyCoverArea(cdp, sessionId);
     const imageTextUploadReady = await verifyImageTextUploadReady(cdp, sessionId);
     const editorImageCount = await countEditorImages(cdp, sessionId);
-    console.log(`[wechat-browser] Upload verification: menu=${selectedMenuLabel || 'unknown'}, flow=${isLegacyCoverFlow ? 'legacy-cover' : 'image-text'}, coverReady=${coverReady}, topImageReady=${topImageReady}, imageTextUploadReady=${imageTextUploadReady}, hasUploadSelection=${hasUploadSelection}, editorImageCount=${editorImageCount}, issue=${uploadIssue ?? 'none'}`);
-    const uploadOk = isLegacyCoverFlow
-      ? coverReady
-      : (isStickerFlow ? (topImageReady || hasUploadSelection || imageTextUploadReady) : imageTextUploadReady);
+    console.log(`[wechat-browser] Upload verification: menu=${selectedMenuLabel || 'unknown'}, flow=sticker-only, topImageReady=${topImageReady}, imageTextUploadReady=${imageTextUploadReady}, hasUploadSelection=${hasUploadSelection}, editorImageCount=${editorImageCount}, issue=${uploadIssue ?? 'none'}`);
+    const uploadOk = topImageReady || hasUploadSelection || imageTextUploadReady;
     if (uploadIssue || !uploadOk) {
       await dumpComposeDiagnostics(cdp, sessionId);
       failWithCode('IMAGEPOST_EDITOR_NOT_READY', `Image upload failed${uploadIssue ? `: ${uploadIssue}` : ''}`);

@@ -9,11 +9,28 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from http.client import IncompleteRead
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parents[2]
+SHARED_DIR = REPO_ROOT / "shared"
+if str(SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(SHARED_DIR))
+
+from image_provider import (  # noqa: E402
+    ImageProviderError,
+    ImageRenderRequest,
+    build_image_router,
+    load_comfly_settings as shared_load_comfly_settings,
+    render_image_with_provider as shared_render_image_with_provider,
+    request_json as shared_request_json,
+)
 
 
 DEFAULT_IMAGE_API: dict[str, Any] = {
@@ -31,6 +48,7 @@ DEFAULT_IMAGE_API: dict[str, Any] = {
     "extra_body": {},
 }
 COMFLY_CONFIG_PATH = Path.home() / ".config" / "comfly" / "config"
+KEYS_ENV_PATH = Path("/Users/aki/.config/ai/keys.env")
 
 HEADING_RE = re.compile(r"^#{1,6}\s+")
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[\u3002\uff01\uff1f.!?])\s*")
@@ -38,9 +56,11 @@ SENTENCE_SPLIT_RE = re.compile(r"(?<=[\u3002\uff01\uff1f.!?])\s*")
 
 def allowed_response_model_aliases(requested_model: str) -> set[str]:
     aliases: dict[str, set[str]] = {
-        "nano-banana-pro": {"nano-banana-pro", "nano-banana-2", "nano-banana-2-2k"},
-        "nano-banana-2": {"nano-banana-2", "nano-banana-pro", "nano-banana-2-2k"},
-        "nano-banana-2-2k": {"nano-banana-2-2k", "nano-banana-2", "nano-banana-pro"},
+        "nano-banana-pro": {"nano-banana-pro", "nano-banana-pro-4k", "nano-banana-2", "nano-banana-2-2k", "nano-banana-2-4k"},
+        "nano-banana-pro-4k": {"nano-banana-pro-4k", "nano-banana-pro", "nano-banana-2-4k", "nano-banana-2-2k", "nano-banana-2"},
+        "nano-banana-2": {"nano-banana-2", "nano-banana-2-2k", "nano-banana-2-4k", "nano-banana-pro", "nano-banana-pro-4k"},
+        "nano-banana-2-2k": {"nano-banana-2-2k", "nano-banana-2", "nano-banana-2-4k", "nano-banana-pro", "nano-banana-pro-4k"},
+        "nano-banana-2-4k": {"nano-banana-2-4k", "nano-banana-2-2k", "nano-banana-2", "nano-banana-pro-4k", "nano-banana-pro"},
     }
     return aliases.get(requested_model, {requested_model})
 
@@ -344,41 +364,14 @@ def convert_with_sips(raw: bytes, src_format: str, dst_format: str) -> bytes | N
 
 
 def load_image_api_settings(_skills_root: Path) -> dict[str, Any]:
-    if not COMFLY_CONFIG_PATH.exists():
-        raise RuntimeError(f"Missing Comfly config file: {COMFLY_CONFIG_PATH}")
-
-    provider = parse_env_like_file(COMFLY_CONFIG_PATH)
-    settings = dict(DEFAULT_IMAGE_API)
-    settings["api_key"] = str(provider.get("COMFLY_API_KEY", "")).strip()
-    settings["base_url"] = normalize_base_url(
-        str(provider.get("COMFLY_API_BASE_URL") or provider.get("COMFLY_API_URL") or "")
-    )
-    settings["image_model"] = str(provider.get("COMFLY_IMAGE_MODEL", "")).strip()
-
-    if not settings.get("base_url"):
-        raise RuntimeError(
-            f"Missing Comfly base URL. Set COMFLY_API_BASE_URL or COMFLY_API_URL in {COMFLY_CONFIG_PATH}."
-        )
-    if not settings.get("api_key"):
-        raise RuntimeError(f"Missing Comfly API key. Set COMFLY_API_KEY in {COMFLY_CONFIG_PATH}.")
-    if not settings.get("image_model"):
-        raise RuntimeError(
-            f"Missing image model. Set COMFLY_IMAGE_MODEL in {COMFLY_CONFIG_PATH}."
-        )
-    return settings
+    return shared_load_comfly_settings()
 
 
 def request_json(url: str, headers: dict[str, str], payload: dict[str, Any], timeout: int) -> Any:
-    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = Request(url, data=data, headers=headers, method="POST")
     try:
-        with urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(f"Comfly API error {exc.code}: {detail}") from exc
-    except URLError as exc:
-        raise RuntimeError(f"Comfly API request failed: {exc}") from exc
+        return shared_request_json(url, headers, payload, timeout, provider="comfly")
+    except ImageProviderError as exc:
+        raise RuntimeError(str(exc)) from exc
 
 
 def extract_first_image(payload: Any) -> tuple[str, str] | None:
@@ -408,87 +401,48 @@ def extract_first_image(payload: Any) -> tuple[str, str] | None:
 
 def download_image(url: str, timeout: int) -> bytes:
     req = Request(url, headers={"User-Agent": "aki-dense-handnote-series"})
-    with urlopen(req, timeout=timeout) as resp:
-        return resp.read()
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            return resp.read()
+    except (URLError, TimeoutError) as exc:
+        last_error = str(exc)
+        for attempt in range(1, 4):
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                temp_path = Path(tmp.name)
+            try:
+                cp = subprocess.run(
+                    [
+                        "curl",
+                        "--http1.1",
+                        "-sSL",
+                        "--retry",
+                        "4",
+                        "--retry-all-errors",
+                        "--retry-delay",
+                        "2",
+                        "--max-time",
+                        str(timeout),
+                        "-H",
+                        "User-Agent: aki-dense-handnote-series",
+                        "-o",
+                        str(temp_path),
+                        url,
+                    ],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                if cp.returncode == 0:
+                    return temp_path.read_bytes()
+                last_error = cp.stderr.strip() or cp.stdout.strip() or last_error
+                time.sleep(min(attempt, 3))
+            finally:
+                temp_path.unlink(missing_ok=True)
+        raise RuntimeError(last_error) from exc
 
 
 def generate_image_with_comfly(prompt: str, output_path: Path, settings: dict[str, Any]) -> None:
-    path = str(settings.get("path") or "/v1/images/generations")
-    if not path.startswith("/"):
-        path = "/" + path
-    api_url = str(settings["base_url"]).rstrip("/") + path
-
-    headers = {
-        "Content-Type": "application/json",
-        str(settings.get("auth_header") or "Authorization"): (
-            f"{str(settings.get('auth_prefix') or 'Bearer ')}{settings['api_key']}"
-        ),
-    }
-    if settings.get("accept_language"):
-        headers["Accept-Language"] = str(settings["accept_language"])
-
-    requested_model = str(settings.get("image_model") or DEFAULT_IMAGE_MODEL).strip()
-    payload: dict[str, Any] = {
-        "model": requested_model,
-        "prompt": prompt,
-        "response_format": "b64_json",
-    }
-    if settings.get("aspect_ratio"):
-        payload["aspect_ratio"] = settings["aspect_ratio"]
-    if settings.get("image_size"):
-        payload["image_size"] = settings["image_size"]
-    if settings.get("image"):
-        payload["image"] = settings["image"]
-
-    extra_body = settings.get("extra_body") or {}
-    if isinstance(extra_body, dict):
-        payload.update(extra_body)
-
-    timeout = int(settings.get("timeout_sec") or 120)
-    response = request_json(api_url, headers, payload, timeout)
-
-    actual_model = ""
-    if isinstance(response, dict):
-        model_val = response.get("model")
-        if isinstance(model_val, str):
-            actual_model = model_val.strip()
-    if actual_model and actual_model not in allowed_response_model_aliases(requested_model):
-        raise RuntimeError(
-            f"Model mismatch: requested '{requested_model}', got '{actual_model}'."
-        )
-
-    image = extract_first_image(response)
-    if not image:
-        raise RuntimeError("No image data returned by Comfly API.")
-
-    kind, data = image
-    if kind == "b64":
-        raw = base64.b64decode(data)
-    else:
-        raw = download_image(data, timeout)
-    raw, stripped = normalize_image_bytes(raw)
-    if stripped:
-        print(
-            f"Warning: stripped {stripped} unexpected leading bytes from image payload.",
-            file=sys.stderr,
-        )
-    detected_format = detect_image_format(raw)
-    output_ext = output_path.suffix.lower().lstrip(".")
-    if output_ext == "jpeg":
-        output_ext = "jpg"
-    if detected_format and output_ext and detected_format != output_ext:
-        converted = convert_with_sips(raw, detected_format, output_ext)
-        if converted is not None:
-            raw = converted
-        else:
-            print(
-                f"Warning: output extension .{output_ext} mismatches returned {detected_format}; "
-                "saved original bytes.",
-                file=sys.stderr,
-            )
-
-    ensure_parent(output_path)
-    output_path.write_bytes(raw)
+    shared_render_image_with_provider(prompt, output_path, "comfly", settings)
 
 
 def main() -> int:
@@ -507,6 +461,7 @@ def main() -> int:
     parser.add_argument("--title", help="Override title text")
     parser.add_argument("--session-id", help="Legacy option (ignored for Comfly API)")
     parser.add_argument("--model", help="Legacy option (ignored, model is locked)")
+    parser.add_argument("--image-provider", choices=["auto", "comfly", "openrouter"], default="auto")
     args = parser.parse_args()
 
     article_path = Path(args.article).expanduser().resolve()
@@ -561,13 +516,7 @@ def main() -> int:
     if args.model:
         print("Warning: --model is ignored; set COMFLY_IMAGE_MODEL in ~/.config/comfly/config.")
 
-    settings: dict[str, Any] = {}
-    if not args.prompt_only:
-        try:
-            settings = load_image_api_settings(skills_root)
-        except RuntimeError as exc:
-            print(str(exc), file=sys.stderr)
-            return 1
+    requests: list[ImageRenderRequest] = []
 
     for idx, chunk in enumerate(chunks, start=1):
         label = str(idx).zfill(width)
@@ -581,14 +530,17 @@ def main() -> int:
 
         if args.prompt_only:
             continue
+        requests.append(ImageRenderRequest(prompt=prompt_text, output_path=output_path))
 
+    if requests:
         try:
-            generate_image_with_comfly(prompt_text, output_path, settings)
-        except RuntimeError as exc:
+            router = build_image_router(args.image_provider)
+            batch_result = router.render_batch(requests)
+        except (ImageProviderError, RuntimeError) as exc:
             print(str(exc), file=sys.stderr)
             return 1
-
-        print(f"Image generated: {output_path}")
+        for item in batch_result.rendered_images:
+            print(f"Image generated: {item.output_path}")
 
     print(f"Series complete: {base_dir}")
     return 0

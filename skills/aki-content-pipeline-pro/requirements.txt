@@ -1,0 +1,8 @@
+# Aki Content Pipeline Pro - Python Dependencies
+#
+# Core pipeline: zero third-party dependencies (Python 3.10+ stdlib only)
+#
+# Optional: cross-platform image processing
+# Without Pillow, image format conversion falls back to macOS `sips` only.
+# Windows/Linux users must install this:
+Pillow>=10.0.0

@@ -6,10 +6,7 @@ import html
 import json
 import os
 import re
-import shutil
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 from state import BLOCKED, DONE, FAILED, RUNNING, set_artifact, set_step
@@ -35,7 +32,6 @@ if str(SHARED_DIR) not in sys.path:
 from aki_runtime import skill_path  # noqa: E402
 
 
-DEFAULT_WECHAT_FETCHER = skill_path("aki-wechat-fetcher", "scripts", "fetch.ts", repo_root_path=REPO_ROOT)
 DEFAULT_YOUTUBE_RUNNER = skill_path("Youtube-clipper-skill", "scripts", "py", repo_root_path=REPO_ROOT)
 DEFAULT_YOUTUBE_DOWNLOAD_SCRIPT = skill_path(
     "Youtube-clipper-skill",
@@ -47,7 +43,6 @@ YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "youtu.be", "www.youtu.be"}
 VTT_TIMECODE_RE = re.compile(
     r"^\d{2}:\d{2}(?::\d{2})?[.,]\d{3}\s+-->\s+\d{2}:\d{2}(?::\d{2})?[.,]\d{3}"
 )
-WECHAT_FETCH_TIMEOUT_SECONDS = 30
 
 
 def _next_index(refs_dir: Path) -> int:
@@ -91,43 +86,6 @@ def _write_pair(refs_dir: Path, idx: int, source_tag: str, raw_text: str) -> tup
     return raw_path, clean_path
 
 
-def _resolve_bun_runner() -> list[str]:
-    for candidate in (
-        os.getenv("BUN_BIN"),
-        os.getenv("BUN_PATH"),
-        str(Path.home() / ".bun" / "bin" / "bun"),
-        "/opt/homebrew/bin/bun",
-        "/usr/local/bin/bun",
-    ):
-        if not candidate:
-            continue
-        path = Path(candidate).expanduser()
-        if path.exists():
-            return [str(path)]
-    if shutil.which("bun"):
-        return ["bun"]
-    return ["npx", "-y", "bun"]
-
-
-def _fetch_wechat_article(url: str, refs_dir: Path, wechat_fetcher: Path, idx: int) -> str:
-    with tempfile.TemporaryDirectory(prefix=f"aki_pipeline_wechat_{idx:02d}_") as tmp:
-        tmp_dir = Path(tmp)
-        cmd = _resolve_bun_runner() + [str(wechat_fetcher), url, "--output", str(tmp_dir), "--no-images"]
-        try:
-            cp = subprocess.run(cmd, text=True, capture_output=True, timeout=WECHAT_FETCH_TIMEOUT_SECONDS)
-        except subprocess.TimeoutExpired as exc:
-            md_files = sorted(tmp_dir.glob("*.md"))
-            if not md_files:
-                raise RuntimeError(f"WeChat fetch timed out: {url}") from exc
-            return md_files[0].read_text(encoding="utf-8", errors="ignore")
-        if cp.returncode != 0:
-            raise RuntimeError(f"WeChat fetch failed: {cp.stderr.strip() or cp.stdout.strip()}")
-        md_files = sorted(tmp_dir.glob("*.md"))
-        if not md_files:
-            raise RuntimeError("WeChat fetch produced no markdown file")
-        return md_files[0].read_text(encoding="utf-8", errors="ignore")
-
-
 def _build_video_placeholder(url: str) -> str:
     return (
         "# 视频来源占位（待手动补充）\n\n"
@@ -137,6 +95,14 @@ def _build_video_placeholder(url: str) -> str:
         "1. 原文逐字稿（可中英）\n"
         "2. 中文翻译稿\n"
         "3. 术语纠错后的最终稿\n"
+    )
+
+
+def _build_manual_source_placeholder(url: str, label: str = "网页来源") -> str:
+    return (
+        f"# {label}占位（待手动补充）\n\n"
+        f"来源链接：{url}\n\n"
+        "自动抓取正文失败。请把原文正文粘贴到这个文件中，然后继续流程。\n"
     )
 
 
@@ -218,7 +184,6 @@ def _fetch_youtube_transcript(url: str, refs_dir: Path, idx: int, runner: Path, 
 def ingest_one(
     source: str,
     refs_dir: Path,
-    wechat_fetcher: Path,
     youtube_runner: Path,
     youtube_download_script: Path,
     idx: int,
@@ -226,18 +191,6 @@ def ingest_one(
     if is_url(source):
         domain = detect_domain(source)
         tag = slug_domain(source)
-        # Prefer dedicated wechat fetcher for mp.weixin links.
-        if domain == "mp.weixin.qq.com" and wechat_fetcher.exists():
-            raw_text = _fetch_wechat_article(source, refs_dir, wechat_fetcher, idx)
-            raw_path, clean_path = _write_pair(refs_dir, idx, tag, raw_text)
-            return {
-                "source": source,
-                "kind": "url",
-                "domain": domain,
-                "status": "ok",
-                "raw_path": str(raw_path),
-                "clean_path": str(clean_path),
-            }
 
         if domain in YOUTUBE_HOSTS and youtube_runner.exists() and youtube_download_script.exists():
             try:
@@ -279,6 +232,20 @@ def ingest_one(
                 "clean_path": str(clean_path),
             }
 
+        if domain == "mp.weixin.qq.com" and len(fetched) < 400:
+            manual_path = refs_dir / f"{idx:02d}_{tag}_manual_input.md"
+            manual_path.write_text(_build_manual_source_placeholder(source, "微信文章"), encoding="utf-8")
+            raw_path, clean_path = _write_pair(refs_dir, idx, tag, f"来源：{source}\n\n请先补充原文正文。")
+            return {
+                "source": source,
+                "kind": "url",
+                "domain": domain,
+                "status": "manual_required",
+                "manual_input_path": str(manual_path),
+                "raw_path": str(raw_path),
+                "clean_path": str(clean_path),
+            }
+
         if not fetched:
             raise RuntimeError("Failed to fetch URL content")
 
@@ -313,14 +280,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Collect sources into refs/ as raw+clean files")
     parser.add_argument("--topic-root", required=True, help="Topic root directory")
     parser.add_argument("--source", action="append", default=[], help="Source URL or local file path")
-    parser.add_argument("--wechat-fetcher", default=str(DEFAULT_WECHAT_FETCHER))
     parser.add_argument("--youtube-runner", default=str(DEFAULT_YOUTUBE_RUNNER))
     parser.add_argument("--youtube-download-script", default=str(DEFAULT_YOUTUBE_DOWNLOAD_SCRIPT))
     args = parser.parse_args()
 
     topic_root = Path(args.topic_root).expanduser().resolve()
     refs_dir = ensure_dir(topic_root / "refs")
-    wechat_fetcher = Path(args.wechat_fetcher).expanduser().resolve()
     youtube_runner = Path(args.youtube_runner).expanduser().resolve()
     youtube_download_script = Path(args.youtube_download_script).expanduser().resolve()
 
@@ -337,7 +302,6 @@ def main() -> int:
             out = ingest_one(
                 item,
                 refs_dir,
-                wechat_fetcher,
                 youtube_runner,
                 youtube_download_script,
                 idx,
@@ -361,7 +325,7 @@ def main() -> int:
             topic_root,
             "ingest_sources",
             BLOCKED,
-            message="Some video sources require manual transcript input. Fill *_video_manual_input.md then rerun.",
+            message="Some sources require manual input. Fill *_manual_input.md or *_video_manual_input.md then rerun.",
             meta={"report": str(report_path)},
         )
         print(str(report_path))

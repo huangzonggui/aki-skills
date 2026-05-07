@@ -23,14 +23,46 @@ if str(SHARED_DIR) not in sys.path:
 
 from aki_runtime import (  # noqa: E402
     default_auto_exporter_path,
+    default_jianying_editor_root,
     default_jianying_projects_root,
     default_jianying_sync_root,
+    obsidian_vault_root,
     skill_path,
 )
 
 
 VIDEO_PIPELINE = skill_path("aki-image-article-video", "scripts", "nl_entrypoint.py", repo_root_path=REPO_ROOT)
 AUTO_EXPORTER = default_auto_exporter_path()
+SCRIPT_TO_SRT = default_jianying_editor_root() / "scripts" / "script_to_srt.py"
+
+
+def _resolve_binary(name: str) -> str:
+    candidate = shutil.which(name)
+    if candidate:
+        return candidate
+    common = {
+        "ffmpeg": [
+            "/opt/homebrew/bin/ffmpeg",
+            "/usr/local/bin/ffmpeg",
+            "/usr/bin/ffmpeg",
+            "C:\\ffmpeg\\bin\\ffmpeg.exe",
+        ],
+        "ffprobe": [
+            "/opt/homebrew/bin/ffprobe",
+            "/usr/local/bin/ffprobe",
+            "/usr/bin/ffprobe",
+            "C:\\ffmpeg\\bin\\ffprobe.exe",
+        ],
+    }
+    for raw in common.get(name, []):
+        path = Path(raw)
+        if path.exists():
+            return str(path)
+    return name
+
+
+FFMPEG_BIN = _resolve_binary("ffmpeg")
+FFPROBE_BIN = _resolve_binary("ffprobe")
 
 
 def _run_cmd(cmd: list[str]) -> dict:
@@ -68,6 +100,38 @@ def _safe_draft_name(raw: str, suffix: str = "_video", max_len: int = 48) -> str
     cap = max(8, max_len - len(suffix))
     stem = stem[:cap].rstrip("_")
     return f"{stem}{suffix}"
+
+
+def _map_to_local_vault(path: Path) -> Path | None:
+    vault_root = obsidian_vault_root()
+    try:
+        idx = path.parts.index(vault_root.name)
+    except ValueError:
+        return None
+    candidate = vault_root.joinpath(*path.parts[idx + 1 :])
+    return candidate.resolve()
+
+
+def _resolve_segment_image_path(layout, segment: dict) -> Path:
+    image_relative = str(segment.get("image_relative") or "").strip()
+    if image_relative:
+        relative_candidate = (layout.root / image_relative).expanduser().resolve()
+        if relative_candidate.exists():
+            return relative_candidate
+
+    raw_image_path = str(segment.get("image_path") or "").strip()
+    if not raw_image_path:
+        raise FileNotFoundError(f"Timeline image missing for slot={segment.get('slot')}")
+
+    image_path = Path(raw_image_path).expanduser()
+    if image_path.exists():
+        return image_path.resolve()
+
+    mapped = _map_to_local_vault(image_path)
+    if mapped and mapped.exists():
+        return mapped
+
+    return image_path.resolve()
 
 
 def _parse_platforms(raw: str, mode: str) -> list[str]:
@@ -161,7 +225,15 @@ def _select_stage_script_text(
 
 
 def _ffmpeg_available() -> bool:
-    return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+    candidates = [
+        (FFMPEG_BIN, FFPROBE_BIN),
+        ("/opt/homebrew/bin/ffmpeg", "/opt/homebrew/bin/ffprobe"),
+        ("/usr/local/bin/ffmpeg", "/usr/local/bin/ffprobe"),
+    ]
+    for ffmpeg_bin, ffprobe_bin in candidates:
+        if ffmpeg_bin and ffprobe_bin and Path(ffmpeg_bin).exists() and Path(ffprobe_bin).exists():
+            return True
+    return False
 
 
 def _choose_export_strategy(force_export: bool, platform_name: str | None = None) -> str:
@@ -212,7 +284,7 @@ def _build_segment_clip(source: Path, duration_sec: float, output_path: Path, fp
     height = int(round(width * 16 / 9))
     if source.suffix.lower() in {".mp4", ".mov", ".m4v", ".webm"}:
         cmd = [
-            "ffmpeg",
+            FFMPEG_BIN,
             "-y",
             "-stream_loop",
             "-1",
@@ -235,7 +307,7 @@ def _build_segment_clip(source: Path, duration_sec: float, output_path: Path, fp
         ]
     else:
         cmd = [
-            "ffmpeg",
+            FFMPEG_BIN,
             "-y",
             "-loop",
             "1",
@@ -274,6 +346,48 @@ def _ffmpeg_escape_concat_path(path: Path) -> str:
     return str(path).replace("'", "'\\''")
 
 
+def _ffmpeg_subtitle_force_style(parsed: dict) -> str:
+    report = dict(parsed.get("subtitle_style_report") or {})
+    style_mode = str(report.get("style_mode") or "").strip()
+    font_size = float(report.get("font_size") or 10.0)
+    primary = "&H00FFFFFF"
+    outline = "&H00000000"
+    if style_mode == "yellow_preset":
+        primary = "&H0026DCFF"
+    display_size = max(18.0, round(font_size * 2.0, 1))
+    return ",".join(
+        [
+            f"FontSize={display_size}",
+            f"PrimaryColour={primary}",
+            f"OutlineColour={outline}",
+            "BorderStyle=1",
+            "Outline=2.2",
+            "Shadow=0",
+            "Alignment=2",
+            "MarginV=110",
+        ]
+    )
+
+
+def _regenerate_export_srt(stage_script: Path, total_duration: float, output_srt: Path) -> Path:
+    if not SCRIPT_TO_SRT.exists():
+        raise FileNotFoundError(f"script_to_srt not found: {SCRIPT_TO_SRT}")
+    output_srt.parent.mkdir(parents=True, exist_ok=True)
+    run_checked(
+        [
+            "python3",
+            str(SCRIPT_TO_SRT),
+            "--script",
+            str(stage_script),
+            "--output",
+            str(output_srt),
+            "--duration",
+            f"{total_duration:.3f}",
+        ]
+    )
+    return output_srt
+
+
 def _sync_draft_to_mirror_root(draft_dir: Path, mirror_root: Path | None) -> Path | None:
     if mirror_root is None:
         return None
@@ -308,7 +422,7 @@ def _manual_export_with_ffmpeg(
     if not audio_path.exists():
         raise FileNotFoundError(f"Audio missing for manual export: {audio_path}")
 
-    srt_path = Path(str(parsed.get("srt_path") or "")).expanduser().resolve()
+    raw_srt_path = Path(str(parsed.get("srt_path") or "")).expanduser().resolve()
     total_duration = float(parsed.get("audio_duration_sec") or 0.0)
     if total_duration <= 0:
         raise RuntimeError("audio_duration_sec missing from pipeline report")
@@ -325,6 +439,7 @@ def _manual_export_with_ffmpeg(
         bgm_path = None
 
     output_video.parent.mkdir(parents=True, exist_ok=True)
+    export_srt_path = output_video.parent / "export_subtitles.srt"
     with tempfile.TemporaryDirectory(prefix="aki-video-export-") as tmpdir:
         tmp = Path(tmpdir)
         segment_paths: list[Path] = []
@@ -342,7 +457,7 @@ def _manual_export_with_ffmpeg(
         visual_path = tmp / "visual.mp4"
         run_checked(
             [
-                "ffmpeg",
+                FFMPEG_BIN,
                 "-y",
                 "-f",
                 "concat",
@@ -360,7 +475,7 @@ def _manual_export_with_ffmpeg(
         if bgm_path:
             run_checked(
                 [
-                    "ffmpeg",
+                    FFMPEG_BIN,
                     "-y",
                     "-i",
                     str(visual_path),
@@ -390,7 +505,7 @@ def _manual_export_with_ffmpeg(
         else:
             run_checked(
                 [
-                    "ffmpeg",
+                    FFMPEG_BIN,
                     "-y",
                     "-i",
                     str(visual_path),
@@ -409,15 +524,19 @@ def _manual_export_with_ffmpeg(
                 ]
             )
 
+        srt_path = _regenerate_export_srt(stage_script, total_duration, export_srt_path)
+        if not srt_path.exists() and raw_srt_path.exists():
+            srt_path = raw_srt_path
         if srt_path.exists():
+            force_style = _ffmpeg_subtitle_force_style(parsed)
             run_checked(
                 [
-                    "ffmpeg",
+                    FFMPEG_BIN,
                     "-y",
                     "-i",
                     str(av_path),
                     "-vf",
-                    f"subtitles='{_ffmpeg_escape_filter_path(srt_path)}'",
+                    f"subtitles='{_ffmpeg_escape_filter_path(srt_path)}':force_style='{force_style}'",
                     "-c:v",
                     "libx264",
                     "-preset",
@@ -438,6 +557,7 @@ def _manual_export_with_ffmpeg(
         "stdout": "manual ffmpeg export completed",
         "stderr": "",
         "ok": True,
+        "subtitle_path": str(export_srt_path),
     }
 
 
@@ -458,7 +578,7 @@ def _build_stage_assets(layout, platform: str) -> tuple[list[Path], Path, str]:
 
     image_paths: list[Path] = []
     for segment in segments:
-        image_path = Path(str(segment.get("image_path") or "")).expanduser().resolve()
+        image_path = _resolve_segment_image_path(layout, segment)
         if not image_path.exists():
             raise FileNotFoundError(f"Timeline image missing: {image_path}")
         image_paths.append(image_path)
@@ -516,6 +636,10 @@ def _build_one_platform(layout, platform: str, args: argparse.Namespace) -> tupl
         args.voice_name,
         "--speed-override",
         str(args.speed_override),
+        "--script-format",
+        "verbatim",
+        "--subtitle-mode",
+        "heuristic",
         "--bgm-mode",
         str(args.bgm_mode),
         "--bgm-min-duration-sec",

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { chromium, type Page } from 'playwright';
+import { chromium, type Locator, type Page } from 'playwright';
 
 const GEMINI_URL = 'https://gemini.google.com/app';
 
@@ -41,7 +41,6 @@ function ensureDir(filePath: string): void {
 
 async function waitForComposer(page: Page, timeoutMs: number): Promise<void> {
   const start = Date.now();
-  const inputLocator = page.locator('textarea, div[contenteditable="true"]');
   while (Date.now() - start < timeoutMs) {
     if (page.url().includes('accounts.google.com')) {
       const waitMs = Date.now() - start;
@@ -51,18 +50,29 @@ async function waitForComposer(page: Page, timeoutMs: number): Promise<void> {
       await page.waitForTimeout(1000);
       continue;
     }
-    const count = await inputLocator.count();
-    if (count > 0) {
-      const visible = await inputLocator.first().isVisible().catch(() => false);
-      if (visible) return;
+    const inputLocator = await composerLocator(page);
+    const visible = await inputLocator.isVisible().catch(() => false);
+    if (visible) {
+      return;
     }
     await page.waitForTimeout(1000);
   }
   throw new Error('Composer not ready. Please login to Gemini in the opened browser window.');
 }
 
+async function composerLocator(page: Page): Promise<Locator> {
+  const inputs = page.locator('textarea, div[contenteditable="true"]');
+  const count = await inputs.count();
+  for (let idx = 0; idx < count; idx += 1) {
+    const candidate = inputs.nth(idx);
+    const visible = await candidate.isVisible().catch(() => false);
+    if (visible) return candidate;
+  }
+  return inputs.first();
+}
+
 async function sendPrompt(page: Page, prompt: string): Promise<void> {
-  const inputLocator = page.locator('textarea, div[contenteditable="true"]').first();
+  const inputLocator = await composerLocator(page);
   await inputLocator.click({ timeout: 10_000 });
   // Use a single-shot paste-like write to avoid accidental multi-send by line breaks.
   await inputLocator.fill(prompt).catch(async () => {
@@ -70,13 +80,33 @@ async function sendPrompt(page: Page, prompt: string): Promise<void> {
   });
 }
 
+async function waitForSubmissionSignal(page: Page, timeoutMs = 5_000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const inputLocator = await composerLocator(page);
+    const hasPrompt = await inputLocator.evaluate((input) => {
+      const element = input as HTMLElement;
+      if (element.tagName.toLowerCase() === 'textarea') {
+        return ((element as HTMLTextAreaElement).value || '').trim().length > 0;
+      }
+      return (element.textContent || '').trim().length > 0;
+    }).catch(() => false);
+    const hasStop = await page.locator(
+      'button[aria-label*="Stop" i],button[aria-label*="停止"],div[role="button"][aria-label*="Stop" i],div[role="button"][aria-label*="停止"]'
+    ).first().isVisible().catch(() => false);
+    const submitted = hasStop || !hasPrompt;
+    if (submitted) return true;
+    await page.waitForTimeout(250);
+  }
+  return false;
+}
+
 async function submitPrompt(page: Page): Promise<void> {
   // First try shortcuts that submit without introducing line breaks.
   const hotkeys = ['Meta+Enter', 'Control+Enter'];
   for (const hotkey of hotkeys) {
     await page.keyboard.press(hotkey).catch(() => undefined);
-    await page.waitForTimeout(300);
-    if (!(await hasPromptInComposer(page))) return;
+    if (await waitForSubmissionSignal(page)) return;
   }
 
   const selectors = [
@@ -97,28 +127,26 @@ async function submitPrompt(page: Page): Promise<void> {
     const visible = await btn.isVisible().catch(() => false);
     if (visible) {
       await btn.click({ timeout: 5_000 }).catch(() => undefined);
-      await page.waitForTimeout(300);
-      if (!(await hasPromptInComposer(page))) return;
+      if (await waitForSubmissionSignal(page)) return;
     }
   }
 
   // Last resort
   await page.keyboard.press('Enter');
-  await page.waitForTimeout(300);
-  if (await hasPromptInComposer(page)) {
+  if (!(await waitForSubmissionSignal(page))) {
     throw new Error('Prompt submit failed. Send button/shortcut did not trigger.');
   }
 }
 
 async function hasPromptInComposer(page: Page): Promise<boolean> {
-  return page.evaluate(() => {
-    const input = document.querySelector('textarea, div[contenteditable="true"]') as HTMLElement | null;
-    if (!input) return false;
-    if (input.tagName.toLowerCase() === 'textarea') {
-      return ((input as HTMLTextAreaElement).value || '').trim().length > 0;
+  const inputLocator = await composerLocator(page);
+  return inputLocator.evaluate((input) => {
+    const element = input as HTMLElement;
+    if (element.tagName.toLowerCase() === 'textarea') {
+      return ((element as HTMLTextAreaElement).value || '').trim().length > 0;
     }
-    return (input.textContent || '').trim().length > 0;
-  });
+    return (element.textContent || '').trim().length > 0;
+  }).catch(() => false);
 }
 
 async function ensureProAvailability(page: Page): Promise<void> {
@@ -161,12 +189,55 @@ async function maybeSelectImageMode(page: Page): Promise<void> {
   }
 }
 
-type VisualCandidate = {
+export type VisualCandidate = {
   key: string;
   src: string;
   score: number;
   y: number;
 };
+
+function isSvgLikeSource(src: string): boolean {
+  return (
+    /^data:image\/svg\+xml/i.test(src)
+    || /image\/svg\+xml/i.test(src)
+    || /\.svg(?:[?#].*)?$/i.test(src)
+  );
+}
+
+function isKnownGeminiPlaceholder(src: string): boolean {
+  return /gstatic\.com\/lamda\/images\/gemini_/i.test(src)
+    || /gstatic\.com\/lamda\/images\/.*(?:sparkle|aurora|logo|star)/i.test(src);
+}
+
+function sourcePriority(src: string): number {
+  if (isKnownGeminiPlaceholder(src)) return -500;
+  if (src.startsWith('blob:')) return 500;
+  if (src.startsWith('data:') && !isSvgLikeSource(src)) return 400;
+  if (isSvgLikeSource(src)) return -200;
+  if (/\.(?:png|jpe?g|webp|avif|bmp|gif)(?:[?#].*)?$/i.test(src)) return 300;
+  if (/^https?:/i.test(src)) return 200;
+  return 100;
+}
+
+function compareCandidates(a: VisualCandidate, b: VisualCandidate): number {
+  const priorityDiff = sourcePriority(b.src) - sourcePriority(a.src);
+  if (priorityDiff !== 0) return priorityDiff;
+  const scoreDiff = b.score - a.score;
+  if (scoreDiff !== 0) return scoreDiff;
+  return b.y - a.y;
+}
+
+export function pickBestVisualCandidate(
+  candidates: VisualCandidate[],
+  beforeKeys: Set<string> = new Set()
+): VisualCandidate | undefined {
+  const usable = candidates.filter((candidate) => candidate.src);
+  const nonPlaceholder = usable.filter((candidate) => !isKnownGeminiPlaceholder(candidate.src));
+  const primaryPool = nonPlaceholder.length > 0 ? nonPlaceholder : usable;
+  const freshPool = primaryPool.filter((candidate) => !beforeKeys.has(candidate.key));
+  const pool = freshPool.length > 0 ? freshPool : primaryPool;
+  return pool.sort(compareCandidates)[0];
+}
 
 async function collectVisualCandidates(page: Page): Promise<VisualCandidate[]> {
   return page.evaluate(() => {
@@ -232,18 +303,28 @@ async function waitForImage(page: Page, timeoutMs: number): Promise<string> {
   await page.waitForFunction(
     (existingKeys) => {
       const minSize = 96;
+      const isSvgLikeSource = (src: string) =>
+        /^data:image\/svg\+xml/i.test(src)
+        || /image\/svg\+xml/i.test(src)
+        || /\.svg(?:[?#].*)?$/i.test(src);
+      const isKnownGeminiPlaceholder = (src: string) =>
+        /gstatic\.com\/lamda\/images\/gemini_/i.test(src)
+        || /gstatic\.com\/lamda\/images\/.*(?:sparkle|aurora|logo|star)/i.test(src);
+      const isRenderableVisual = (src: string) =>
+        !!src && !isKnownGeminiPlaceholder(src) && !isSvgLikeSource(src);
+
       const images = Array.from(document.querySelectorAll('img'));
-      const imgKeys = images
+      const imageCandidates = images
         .map((img) => {
           const el = img as HTMLImageElement;
           const w = el.naturalWidth || el.width || 0;
           const h = el.naturalHeight || el.height || 0;
-          if (w < minSize || h < minSize) return '';
+          if (w < minSize || h < minSize) return null;
           const src = el.currentSrc || el.src || '';
-          if (!src) return '';
-          return `img:${src}|${w}x${h}`;
+          if (!src) return null;
+          return { key: `img:${src}|${w}x${h}`, src };
         })
-        .filter(Boolean);
+        .filter(Boolean) as Array<{ key: string; src: string }>;
 
       const canvases = Array.from(document.querySelectorAll('canvas'));
       const canvasKeys = canvases
@@ -263,26 +344,36 @@ async function waitForImage(page: Page, timeoutMs: number): Promise<string> {
         .filter(Boolean);
 
       const bgNodes = Array.from(document.querySelectorAll('[style*="background-image"], [role="img"]'));
-      const bgKeys = bgNodes
+      const bgCandidates = bgNodes
         .map((node) => {
           const el = node as HTMLElement;
           const rect = el.getBoundingClientRect();
           const w = Math.round(rect.width || 0);
           const h = Math.round(rect.height || 0);
-          if (w < minSize || h < minSize) return '';
+          if (w < minSize || h < minSize) return null;
           const style = getComputedStyle(el);
           const bg = style.backgroundImage || '';
-          if (!bg || bg === 'none') return '';
+          if (!bg || bg === 'none') return null;
           const match = bg.match(/url\((['"]?)(.*?)\1\)/i);
           const src = (match?.[2] || '').trim();
-          if (!src) return '';
-          return `bg:${src}|${w}x${h}`;
+          if (!src) return null;
+          return { key: `bg:${src}|${w}x${h}`, src };
         })
-        .filter(Boolean);
+        .filter(Boolean) as Array<{ key: string; src: string }>;
 
-      const nowKeys = [...imgKeys, ...canvasKeys, ...bgKeys];
-      const hasNewVisual = nowKeys.some((key) => !existingKeys.includes(key));
-      if (hasNewVisual) return true;
+      const nowKeys = [
+        ...imageCandidates.map((candidate) => candidate.key),
+        ...canvasKeys,
+        ...bgCandidates.map((candidate) => candidate.key),
+      ];
+      const hasFreshRenderableImage = imageCandidates.some(
+        (candidate) => !existingKeys.includes(candidate.key) && isRenderableVisual(candidate.src)
+      );
+      const hasFreshCanvas = canvasKeys.some((key) => !existingKeys.includes(key));
+      const hasFreshRenderableBackground = bgCandidates.some(
+        (candidate) => !existingKeys.includes(candidate.key) && isRenderableVisual(candidate.src)
+      );
+      if (hasFreshRenderableImage || hasFreshCanvas || hasFreshRenderableBackground) return true;
 
       const bodyText = document.body?.innerText || '';
       const loading = /正在加载|Loading/i.test(bodyText);
@@ -290,7 +381,10 @@ async function waitForImage(page: Page, timeoutMs: number): Promise<string> {
         'button[aria-label*="Stop" i],button[aria-label*="停止"],div[role="button"][aria-label*="Stop" i],div[role="button"][aria-label*="停止"]'
       );
       const hasStop = !!stopButton;
-      return !hasStop && !loading && nowKeys.length > 0;
+      const hasRenderableVisual = imageCandidates.some((candidate) => isRenderableVisual(candidate.src))
+        || bgCandidates.some((candidate) => isRenderableVisual(candidate.src))
+        || canvasKeys.length > 0;
+      return !hasStop && !loading && hasRenderableVisual && nowKeys.length > 0;
     },
     beforeKeyList,
     { timeout: timeoutMs }
@@ -299,16 +393,11 @@ async function waitForImage(page: Page, timeoutMs: number): Promise<string> {
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => undefined);
   await page.waitForTimeout(500).catch(() => undefined);
   const after = await collectVisualCandidates(page);
-  const fresh = after.filter((x) => !beforeKeys.has(x.key) && x.src);
-  const pool = fresh.length > 0 ? fresh : after.filter((x) => x.src);
-  if (pool.length === 0) {
+  const best = pickBestVisualCandidate(after, beforeKeys);
+  if (!best) {
     throw new Error('Image src not found.');
   }
-  pool.sort((a, b) => {
-    if (a.y !== b.y) return b.y - a.y;
-    return b.score - a.score;
-  });
-  return pool[0]?.src || '';
+  return best.src;
 }
 
 async function downloadImage(page: Page, src: string, outputPath: string): Promise<void> {
@@ -321,6 +410,34 @@ async function downloadImage(page: Page, src: string, outputPath: string): Promi
   }
 
   if (src.startsWith('blob:')) {
+    const dataUrl = await page.evaluate(async (url) => {
+      const images = Array.from(document.querySelectorAll('img'));
+      const target = images.find((img) => {
+        const el = img as HTMLImageElement;
+        return (el.currentSrc || el.src || '') === url;
+      }) as HTMLImageElement | undefined;
+      if (!target) return '';
+      if ('decode' in target) {
+        await target.decode().catch(() => undefined);
+      }
+      const width = target.naturalWidth || target.width || 0;
+      const height = target.naturalHeight || target.height || 0;
+      if (!width || !height) return '';
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return '';
+      ctx.drawImage(target, 0, 0, width, height);
+      return canvas.toDataURL('image/png');
+    }, src);
+    if (dataUrl) {
+      const base64 = dataUrl.split(',')[1] || '';
+      ensureDir(outputPath);
+      fs.writeFileSync(outputPath, Buffer.from(base64, 'base64'));
+      return;
+    }
+
     const bytes = await page.evaluate(async (url) => {
       const res = await fetch(url);
       const arr = new Uint8Array(await res.arrayBuffer());

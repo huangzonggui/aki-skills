@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import time
 from pathlib import Path
 from typing import Any
@@ -148,10 +147,15 @@ def _collect_cache_music_paths_from_project(project_dir: Path, music_dir: Path) 
             if not isinstance(audio, dict):
                 continue
             raw = str(audio.get("path", ""))
-            if "/Cache/music/" not in raw or not raw.lower().endswith(".mp3"):
+            if not raw.lower().endswith(".mp3"):
                 continue
             normalized = _normalize_music_path(raw, music_dir)
             if normalized is not None and normalized.exists():
+                try:
+                    normalized.relative_to(music_dir.resolve())
+                except Exception:
+                    if "/Cache/music/" not in raw:
+                        continue
                 paths.add(normalized)
     return paths
 
@@ -165,6 +169,8 @@ def _extract_jy_favorite_commercial_tracks(projects_root: Path, music_dir: Path)
             "favorite_commercial_total": 0,
             "resolved_track_total": 0,
             "resolved_tracks": [],
+            "resolved_favorite_tracks": [],
+            "resolved_favorite_commercial_tracks": [],
             "unresolved_ids": [],
             "unresolved_preview": [],
         }
@@ -216,15 +222,22 @@ def _extract_jy_favorite_commercial_tracks(projects_root: Path, music_dir: Path)
     favorite_entries = [e for e in entries.values() if bool(e.get("favorite"))]
     favorite_commercial = [e for e in favorite_entries if bool(e.get("commercial"))]
 
-    resolved_tracks: list[str] = []
+    resolved_favorite_tracks: list[str] = []
+    resolved_favorite_commercial_tracks: list[str] = []
     unresolved_preview: list[dict[str, Any]] = []
     unresolved_ids: list[str] = []
+
+    for item in favorite_entries:
+        mid = str(item.get("music_id", ""))
+        mapped = sorted({str(p.resolve()) for p in id_to_paths.get(mid, set()) if p.exists()})
+        if mapped:
+            resolved_favorite_tracks.extend(mapped)
 
     for item in favorite_commercial:
         mid = str(item.get("music_id", ""))
         mapped = sorted({str(p.resolve()) for p in id_to_paths.get(mid, set()) if p.exists()})
         if mapped:
-            resolved_tracks.extend(mapped)
+            resolved_favorite_commercial_tracks.extend(mapped)
         else:
             unresolved_ids.append(mid)
             unresolved_preview.append(
@@ -236,24 +249,35 @@ def _extract_jy_favorite_commercial_tracks(projects_root: Path, music_dir: Path)
             )
 
     # Deduplicate stable output
-    resolved_tracks = sorted(set(resolved_tracks))
+    resolved_favorite_tracks = sorted(set(resolved_favorite_tracks))
+    resolved_favorite_commercial_tracks = sorted(set(resolved_favorite_commercial_tracks))
 
     return {
         "enabled": True,
         "projects_root": str(projects_root),
         "favorite_total": len(favorite_entries),
         "favorite_commercial_total": len(favorite_commercial),
-        "resolved_track_total": len(resolved_tracks),
-        "resolved_tracks": resolved_tracks,
+        "resolved_track_total": len(resolved_favorite_commercial_tracks),
+        "resolved_tracks": resolved_favorite_commercial_tracks,
+        "resolved_favorite_tracks": resolved_favorite_tracks,
+        "resolved_favorite_commercial_tracks": resolved_favorite_commercial_tracks,
         "unresolved_ids": unresolved_ids,
         "unresolved_preview": unresolved_preview[:10],
     }
 
 
+def _score_candidate(path: Path, meta: dict[str, Any], recent_picks: list[str]) -> tuple[int, int, int, str]:
+    key = str(path.resolve())
+    recent_penalty = recent_picks.count(key)
+    hits = int(meta.get("hits", 0) or 0)
+    last_used = int(meta.get("last_used", 0) or 0)
+    return (recent_penalty, hits, last_used, path.name.lower())
+
+
 def choose_bgm(
     music_dir: Path,
     history_file: Path,
-    mode: str = "auto_tech_from_jy_cache",
+    mode: str = "favorites_first_controlled_fallback",
     min_music_duration_sec: float = 45.0,
     projects_root: Path | None = None,
     prefer_jy_favorite_commercial: bool = True,
@@ -292,7 +316,7 @@ def choose_bgm(
         music_pool = [p for p in pool if tracks_meta.get(str(p), {}).get("category") == "music"]
         pool = music_pool or pool
 
-    candidates: list[Path]
+    candidates: list[Path] = []
     source = "random_pool"
 
     jy_favorites_report: dict[str, Any] = {
@@ -300,24 +324,62 @@ def choose_bgm(
         "favorite_total": 0,
         "favorite_commercial_total": 0,
         "resolved_track_total": 0,
+        "resolved_favorite_tracks": [],
+        "resolved_favorite_commercial_tracks": [],
     }
     if prefer_jy_favorite_commercial and projects_root is not None:
         jy_favorites_report = _extract_jy_favorite_commercial_tracks(projects_root, music_dir)
-        resolved = set(str(Path(p).resolve()) for p in jy_favorites_report.get("resolved_tracks", []))
-        if resolved:
-            jy_candidates = [p for p in pool if str(p.resolve()) in resolved]
-            if jy_candidates:
-                candidates = jy_candidates
-                source = "jy_favorite_commercial_pool"
-            else:
-                candidates = []
+        resolved_commercial = set(
+            str(Path(p).resolve()) for p in jy_favorites_report.get("resolved_favorite_commercial_tracks", [])
+        )
+        resolved_favorites = set(
+            str(Path(p).resolve()) for p in jy_favorites_report.get("resolved_favorite_tracks", [])
+        )
+        if mode == "favorites_first_controlled_fallback":
+            if resolved_commercial:
+                candidates = [p for p in pool if str(p.resolve()) in resolved_commercial]
+                if candidates:
+                    source = "jy_favorite_commercial_pool"
+            if not candidates and resolved_favorites:
+                candidates = [p for p in pool if str(p.resolve()) in resolved_favorites]
+                if candidates:
+                    source = "jy_favorite_pool"
         else:
-            candidates = []
-    else:
-        candidates = []
+            if resolved_commercial:
+                jy_candidates = [p for p in pool if str(p.resolve()) in resolved_commercial]
+                if jy_candidates:
+                    candidates = jy_candidates
+                    source = "jy_favorite_commercial_pool"
 
     if not candidates:
-        if mode == "auto_tech_from_jy_cache":
+        if mode == "favorites_first_controlled_fallback":
+            music_pool = [p for p in pool if tracks_meta.get(str(p), {}).get("category") == "music"]
+            base_pool = music_pool or pool
+            tech = [p for p in base_pool if tracks_meta.get(str(p), {}).get("status") == "tech_like"]
+            if tech:
+                candidates = tech
+                source = "tech_like_pool"
+            else:
+                return {
+                    "ok": False,
+                    "track_path": "",
+                    "source": "none",
+                    "policy": mode,
+                    "reason": "no resolved favorite tracks or approved fallback tracks",
+                    "jy_favorites": {
+                        "enabled": bool(jy_favorites_report.get("enabled", False)),
+                        "favorite_total": int(jy_favorites_report.get("favorite_total", 0) or 0),
+                        "favorite_commercial_total": int(jy_favorites_report.get("favorite_commercial_total", 0) or 0),
+                        "resolved_track_total": int(jy_favorites_report.get("resolved_track_total", 0) or 0),
+                        "resolved_favorite_tracks": list(jy_favorites_report.get("resolved_favorite_tracks", [])),
+                        "resolved_favorite_commercial_tracks": list(
+                            jy_favorites_report.get("resolved_favorite_commercial_tracks", [])
+                        ),
+                        "unresolved_ids": list(jy_favorites_report.get("unresolved_ids", [])),
+                        "unresolved_preview": list(jy_favorites_report.get("unresolved_preview", [])),
+                    },
+                }
+        elif mode == "auto_tech_from_jy_cache":
             music_pool = [p for p in pool if tracks_meta.get(str(p), {}).get("category") == "music"]
             base_pool = music_pool or pool
             tech = [p for p in base_pool if tracks_meta.get(str(p), {}).get("status") == "tech_like"]
@@ -346,7 +408,7 @@ def choose_bgm(
             candidates = filtered
             source += "_no_repeat"
 
-    recent_window = min(3, len(candidates) - 1) if len(candidates) > 1 else 0
+    recent_window = min(5, len(candidates) - 1) if len(candidates) > 1 else 0
     if recent_window > 0 and recent_picks:
         avoid_recent = set(recent_picks[-recent_window:])
         filtered = [p for p in candidates if str(p) not in avoid_recent]
@@ -354,7 +416,10 @@ def choose_bgm(
             candidates = filtered
             source += "_rotated"
 
-    chosen = random.choice(candidates)
+    chosen = sorted(
+        candidates,
+        key=lambda path: _score_candidate(path, tracks_meta.get(str(path), {}), recent_picks[-10:]),
+    )[0]
     key = str(chosen)
     meta = tracks_meta.setdefault(key, {"status": "unknown", "hits": 0, "last_used": 0})
     meta["hits"] = int(meta.get("hits", 0)) + 1
@@ -380,6 +445,10 @@ def choose_bgm(
             "favorite_total": int(jy_favorites_report.get("favorite_total", 0) or 0),
             "favorite_commercial_total": int(jy_favorites_report.get("favorite_commercial_total", 0) or 0),
             "resolved_track_total": int(jy_favorites_report.get("resolved_track_total", 0) or 0),
+            "resolved_favorite_tracks": list(jy_favorites_report.get("resolved_favorite_tracks", [])),
+            "resolved_favorite_commercial_tracks": list(
+                jy_favorites_report.get("resolved_favorite_commercial_tracks", [])
+            ),
             "unresolved_ids": list(jy_favorites_report.get("unresolved_ids", [])),
             "unresolved_preview": list(jy_favorites_report.get("unresolved_preview", [])),
         },

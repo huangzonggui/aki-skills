@@ -28,6 +28,8 @@ npx -y bun ./scripts/wechat-browser.ts --intent imagepost --markdown source.md -
 - `--submit` 时，预提交设置默认开启：原创/创作来源/赞赏/广告/合集。
 - 为避免误操作，`--skip-pre-submit-settings` 默认会被忽略。
 - 仅当显式设置 `WECHAT_ALLOW_SKIP_PRE_SUBMIT=1` 时，才允许跳过这些设置。
+- 脚本只接受“真贴图页”继续执行：必须出现 `#js_content_top .image-selector` 顶部图片区。
+- 如果后台虽然从 `贴图` 入口进入，但实际落到了正文区/封面区的 legacy 壳，脚本会报 `LEGACY_IMAGEPOST_FLOW` 并中止，不会继续保存草稿。
 
 ## Parameters
 

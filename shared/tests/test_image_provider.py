@@ -19,12 +19,7 @@ PNG_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HA
 
 
 class LoadProviderConfigsTests(unittest.TestCase):
-    def test_load_provider_configs_prefers_keys_env_and_sets_openrouter_defaults(self) -> None:
-        config_data = {
-            "COMFLY_API_KEY": "config-comfly-key",
-            "COMFLY_API_BASE_URL": "https://config.example.com",
-            "COMFLY_IMAGE_MODEL": "nano-banana-2-4k",
-        }
+    def test_load_provider_configs_reads_keys_env_and_sets_openrouter_defaults(self) -> None:
         keys_data = {
             "COMFLY_API_KEY": "keys-comfly-key",
             "COMFLY_API_BASE_URL": "https://keys.example.com",
@@ -37,12 +32,12 @@ class LoadProviderConfigsTests(unittest.TestCase):
         with patch.object(
             image_provider,
             "parse_env_like_file",
-            side_effect=lambda path: dict(keys_data)
-            if str(path).endswith("keys.env")
-            else dict(config_data),
-        ):
+            return_value=dict(keys_data),
+        ) as parse_mock:
             configs = image_provider.load_provider_configs()
 
+        parse_mock.assert_called_once()
+        self.assertTrue(str(parse_mock.call_args.args[0]).endswith("keys.env"))
         self.assertEqual(configs["comfly"]["api_key"], "keys-comfly-key")
         self.assertEqual(configs["comfly"]["base_url"], "https://keys.example.com")
         self.assertEqual(configs["comfly"]["size"], "1024x1536")

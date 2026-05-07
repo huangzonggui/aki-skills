@@ -12,7 +12,7 @@
 
 ## 本轮不做
 
-1. 不改 `publish_wechat_drafts` 的实现。
+1. `publish_wechat_drafts` 改走官方 API，不走浏览器自动化。
 2. 不做发布报告标准化。
 3. 不做生图后 `quality gate`。
 4. 不做自动发布到小红书/抖音/视频号。
@@ -22,7 +22,7 @@
 
 ```mermaid
 flowchart TD
-  A0["创建话题目录 / 初始化状态 <br/> 调用：aki-content-pipeline-pro init_topic <br/> 产物：meta/state.json"] --> A["收集来源 refs/ <br/> 调用：aki-wechat-fetcher / youtube-clipper"]
+  A0["创建话题目录 / 初始化状态 <br/> 调用：aki-content-pipeline-pro init_topic <br/> 产物：meta/state.json"] --> A["收集来源 refs/ <br/> 普通网页抓取 / youtube-clipper / 手工补录"]
   A --> B["生成核心母稿 ./core_note.md <br/> 调用：aki-text-note-summarizer"]
   B --> C["人工直接修改 core_note.md <br/> 调用：无额外问题文件，用户直接改母稿"]
   C --> C1["人工确认母稿可进入后续流程 <br/> 调用：aki-content-pipeline-pro approve_core_note"]

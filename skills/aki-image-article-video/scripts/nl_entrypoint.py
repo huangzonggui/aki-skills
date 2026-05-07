@@ -132,13 +132,24 @@ def main() -> None:
         default="strict",
         choices=["strict", "medium", "off"],
     )
-    parser.add_argument("--subtitle-font", default="本黑体")
-    parser.add_argument("--subtitle-max-chars", type=int, default=26)
-    parser.add_argument("--subtitle-max-duration", type=float, default=3.2)
+    parser.add_argument("--subtitle-font", default="莫雪体")
+    parser.add_argument("--subtitle-font-size", type=float, default=10.0)
+    parser.add_argument("--subtitle-style", default="yellow_preset")
+    parser.add_argument("--subtitle-max-chars", type=int, default=34)
+    parser.add_argument("--subtitle-max-duration", type=float, default=4.6)
     parser.add_argument("--script-editor-cmd", default="")
     parser.add_argument("--script-editor-timeout-sec", type=int, default=180)
-    parser.add_argument("--bgm-mode", default="auto_tech_from_jy_cache")
+    parser.add_argument("--bgm-mode", default="favorites_first_controlled_fallback")
     parser.add_argument("--bgm-min-duration-sec", type=float, default=45.0)
+    parser.add_argument(
+        "--image-fit-mode",
+        default="contain_with_bg_extension",
+        choices=["contain_preserve", "contain_center_by_content", "contain_with_bg_extension"],
+    )
+    parser.add_argument("--content-bbox-threshold", type=int, default=245)
+    parser.add_argument("--bg-extension-blur", type=float, default=0.75)
+    parser.add_argument("--target-width", type=int, default=1440)
+    parser.add_argument("--target-height", type=int, default=2560)
     parser.add_argument("--new-name", default="")
     parser.add_argument("--json-report", default="")
 
@@ -153,6 +164,11 @@ def main() -> None:
     # feedback inputs
     parser.add_argument("--bgm-track-path", default="")
     parser.add_argument("--bgm-feedback", default="")
+    parser.add_argument(
+        "--animation-preset",
+        default="zoom_group_ii",
+        choices=["none", "flip_zoom", "zoom_combo", "zoom_group_ii"],
+    )
     args = parser.parse_args()
 
     project_dir = Path(args.project_dir).expanduser().resolve()
@@ -196,7 +212,7 @@ def main() -> None:
     elif float(getattr(voice_profile, "default_speed", 0.0) or 0.0) > 0:
         speed = float(voice_profile.default_speed)
     elif args.voice_name == "日常松弛男":
-        speed = 1.2
+        speed = 1.08
     else:
         speed = 1.0
 
@@ -246,6 +262,10 @@ def main() -> None:
         args.subtitle_qa_policy,
         "--subtitle-font",
         args.subtitle_font,
+        "--subtitle-font-size",
+        str(args.subtitle_font_size),
+        "--subtitle-style",
+        args.subtitle_style,
         "--subtitle-max-chars",
         str(args.subtitle_max_chars),
         "--subtitle-max-duration",
@@ -318,6 +338,16 @@ def main() -> None:
             str(STILL_IMAGE_REPAIR),
             "--draft-dir",
             str(build_report["draft_path"]),
+            "--image-fit-mode",
+            args.image_fit_mode,
+            "--content-bbox-threshold",
+            str(args.content_bbox_threshold),
+            "--bg-extension-blur",
+            str(args.bg_extension_blur),
+            "--target-width",
+            str(args.target_width),
+            "--target-height",
+            str(args.target_height),
             "--json-report",
             str(cfg.runtime_reports_dir / f"{draft_name}__still_image_repair.json"),
         ]
@@ -338,7 +368,7 @@ def main() -> None:
         "--draft-dir",
         str(build_report["draft_path"]),
         "--animation-preset",
-        "flip_zoom",
+        str(args.animation_preset),
         "--disable-bgm-speech-follow",
         "--json-report",
         str(enh_report_path),
@@ -368,6 +398,7 @@ def main() -> None:
         "cpm_report": build_report.get("cpm_report", {}),
         "speed_report": build_report.get("speed_report", {}),
         "subtitle_report": build_report.get("subtitle_report", {}),
+        "subtitle_style_report": build_report.get("subtitle_style_report", {}),
         "draft_asset_repair": repair_report,
         "bgm_report": {
             "track_path": bgm_pick.get("track_path", ""),

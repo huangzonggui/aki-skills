@@ -53,7 +53,7 @@ npx -y bun ${SKILL_DIR}/scripts/generate-html.ts input.md --output ./output/arti
 
 | Style | Best For | Notes |
 |------|----------|-------|
-| `part-guide` | 教程、安装说明、工具指南 | 当前默认样式；以编号 `PART` 分节头、终端框、绿色强调和胶囊标签感为识别特征 |
+| `part-guide` | 教程、安装说明、工具指南 | 当前默认样式；以编号分节头、终端框、绿色强调和胶囊标签感为识别特征 |
 | `classic` | 通用文章、观点型长文 | 保持现有通用视觉不变 |
 
 ## Visual Design (Reference: modern-article-styler)

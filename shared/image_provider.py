@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from http.client import IncompleteRead
+from http.client import IncompleteRead, RemoteDisconnected
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
@@ -17,7 +17,6 @@ from urllib.request import Request, urlopen
 from aki_runtime import default_ai_keys_env_path
 
 
-DEFAULT_COMFLY_CONFIG_PATH = Path.home() / ".config" / "comfly" / "config"
 DEFAULT_COMFLY_BASE_URL = "https://ai.comfly.chat"
 DEFAULT_COMFLY_PATH = "/v1/images/generations"
 DEFAULT_OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -127,7 +126,6 @@ def infer_openrouter_image_size(raw_model: str, configured_size: str) -> str:
 
 
 def load_provider_configs() -> dict[str, dict[str, Any]]:
-    config_file = parse_env_like_file(DEFAULT_COMFLY_CONFIG_PATH)
     keys_file = parse_env_like_file(default_ai_keys_env_path())
 
     configs: dict[str, dict[str, Any]] = {}
@@ -135,7 +133,6 @@ def load_provider_configs() -> dict[str, dict[str, Any]]:
     comfly_api_key = (
         os.getenv("COMFLY_API_KEY")
         or keys_file.get("COMFLY_API_KEY")
-        or config_file.get("COMFLY_API_KEY")
         or ""
     ).strip()
     comfly_base = normalize_base_url(
@@ -144,15 +141,12 @@ def load_provider_configs() -> dict[str, dict[str, Any]]:
             or os.getenv("COMFLY_API_URL")
             or keys_file.get("COMFLY_API_BASE_URL")
             or keys_file.get("COMFLY_API_URL")
-            or config_file.get("COMFLY_API_BASE_URL")
-            or config_file.get("COMFLY_API_URL")
             or DEFAULT_COMFLY_BASE_URL
         ).strip()
     )
     comfly_model = (
         os.getenv("COMFLY_IMAGE_MODEL")
         or keys_file.get("COMFLY_IMAGE_MODEL")
-        or config_file.get("COMFLY_IMAGE_MODEL")
         or ""
     ).strip()
     if comfly_api_key and comfly_model:
@@ -167,7 +161,6 @@ def load_provider_configs() -> dict[str, dict[str, Any]]:
                 (
                     os.getenv("COMFLY_IMAGE_TIMEOUT_SEC")
                     or keys_file.get("COMFLY_IMAGE_TIMEOUT_SEC")
-                    or config_file.get("COMFLY_IMAGE_TIMEOUT_SEC")
                     or "120"
                 ).strip()
             ),
@@ -176,13 +169,11 @@ def load_provider_configs() -> dict[str, dict[str, Any]]:
             "size": (
                 os.getenv("COMFLY_IMAGE_SIZE")
                 or keys_file.get("COMFLY_IMAGE_SIZE")
-                or config_file.get("COMFLY_IMAGE_SIZE")
                 or ""
             ).strip(),
             "quality": (
                 os.getenv("COMFLY_IMAGE_QUALITY")
                 or keys_file.get("COMFLY_IMAGE_QUALITY")
-                or config_file.get("COMFLY_IMAGE_QUALITY")
                 or ""
             ).strip(),
             "image": [],
@@ -193,13 +184,11 @@ def load_provider_configs() -> dict[str, dict[str, Any]]:
     openrouter_api_key = (
         os.getenv("OPENROUTER_API_KEY")
         or keys_file.get("OPENROUTER_API_KEY")
-        or config_file.get("OPENROUTER_API_KEY")
         or ""
     ).strip()
     openrouter_model = (
         os.getenv("OPENROUTER_IMAGE_MODEL")
         or keys_file.get("OPENROUTER_IMAGE_MODEL")
-        or config_file.get("OPENROUTER_IMAGE_MODEL")
         or DEFAULT_OPENROUTER_IMAGE_MODEL
     ).strip()
     openrouter_api_url = normalize_openrouter_api_url(
@@ -208,8 +197,6 @@ def load_provider_configs() -> dict[str, dict[str, Any]]:
             or os.getenv("OPENROUTER_API_BASE_URL")
             or keys_file.get("OPENROUTER_API_URL")
             or keys_file.get("OPENROUTER_API_BASE_URL")
-            or config_file.get("OPENROUTER_API_URL")
-            or config_file.get("OPENROUTER_API_BASE_URL")
             or ""
         ).strip()
     )
@@ -218,7 +205,6 @@ def load_provider_configs() -> dict[str, dict[str, Any]]:
         (
             os.getenv("OPENROUTER_IMAGE_SIZE")
             or keys_file.get("OPENROUTER_IMAGE_SIZE")
-            or config_file.get("OPENROUTER_IMAGE_SIZE")
             or ""
         ).strip(),
     )
@@ -233,20 +219,17 @@ def load_provider_configs() -> dict[str, dict[str, Any]]:
                 (
                     os.getenv("OPENROUTER_IMAGE_TIMEOUT_SEC")
                     or keys_file.get("OPENROUTER_IMAGE_TIMEOUT_SEC")
-                    or config_file.get("OPENROUTER_IMAGE_TIMEOUT_SEC")
                     or "180"
                 ).strip()
             ),
             "app_name": (
                 os.getenv("OPENROUTER_APP_NAME")
                 or keys_file.get("OPENROUTER_APP_NAME")
-                or config_file.get("OPENROUTER_APP_NAME")
                 or ""
             ).strip(),
             "site_url": (
                 os.getenv("OPENROUTER_SITE_URL")
                 or keys_file.get("OPENROUTER_SITE_URL")
-                or config_file.get("OPENROUTER_SITE_URL")
                 or ""
             ).strip(),
         }
@@ -259,7 +242,7 @@ def load_comfly_settings() -> dict[str, Any]:
         raise ImageProviderError(
             provider="comfly",
             category="config",
-            message=f"Missing Comfly config. Set COMFLY_API_KEY and COMFLY_IMAGE_MODEL in {default_ai_keys_env_path()} or {DEFAULT_COMFLY_CONFIG_PATH}.",
+            message=f"Missing Comfly config. Set COMFLY_API_KEY and COMFLY_IMAGE_MODEL in {default_ai_keys_env_path()}.",
             recoverable=False,
         )
     return dict(configs["comfly"])
@@ -419,7 +402,7 @@ def request_json(
             recoverable=recoverable,
             status_code=exc.code,
         ) from exc
-    except (URLError, TimeoutError, IncompleteRead) as exc:
+    except (URLError, TimeoutError, IncompleteRead, RemoteDisconnected) as exc:
         return _curl_request_json(url, headers, payload, timeout, provider)
 
     try:
@@ -604,7 +587,29 @@ def detect_image_format(raw: bytes) -> str:
     return ""
 
 
+def _convert_with_pillow(raw: bytes, dst_format: str) -> bytes | None:
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        img = Image.open(BytesIO(raw))
+        if img.mode in ("RGBA", "P") and dst_format in ("jpg", "jpeg"):
+            img = img.convert("RGB")
+        output = BytesIO()
+        save_format = "JPEG" if dst_format in ("jpg", "jpeg") else dst_format.upper()
+        img.save(output, format=save_format)
+        return output.getvalue()
+    except Exception:
+        return None
+
+
 def convert_with_sips(raw: bytes, src_format: str, dst_format: str) -> bytes | None:
+    converted = _convert_with_pillow(raw, dst_format)
+    if converted is not None:
+        return converted
     sips_bin = shutil.which("sips")
     if not sips_bin:
         return None

@@ -14,11 +14,15 @@ from urllib.request import Request, urlopen
 from generate_handnote_series import (
     ensure_parent,
     extract_title,
-    generate_image_with_comfly,
-    load_image_api_settings,
     read_text,
     strip_frontmatter,
 )
+
+SHARED_DIR = Path(__file__).resolve().parents[3] / "shared"
+if str(SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(SHARED_DIR))
+
+from image_provider import ImageRenderRequest, build_image_router  # noqa: E402
 
 COVER_SCRIPT_DIR = Path(__file__).resolve().parents[2] / "aki-handnote-cover" / "scripts"
 if str(COVER_SCRIPT_DIR) not in sys.path:
@@ -1141,19 +1145,21 @@ def _render_images(
     skills_root: Path,
     model_override: str,
     render_series_limit: int,
+    image_provider: str,
 ) -> tuple[Path | None, list[Path]]:
-    settings = load_image_api_settings(skills_root)
     if model_override:
         print(
             "Warning: --model is ignored; set COMFLY_IMAGE_MODEL in ~/.config/comfly/config.",
             file=sys.stderr,
         )
 
+    router = build_image_router(image_provider)
+    requests: list[ImageRenderRequest] = []
     generated_cover: Path | None = None
     if cover_prompt is not None:
         ensure_parent(cover_output)
-        generate_image_with_comfly(cover_prompt, cover_output, settings)
         generated_cover = cover_output
+        requests.append(ImageRenderRequest(prompt=cover_prompt, output_path=cover_output))
 
     series_output_dir.mkdir(parents=True, exist_ok=True)
     generated: list[Path] = []
@@ -1164,8 +1170,9 @@ def _render_images(
     for idx, prompt in enumerate(prompts_to_render, start=1):
         label = str(idx).zfill(width)
         output = series_output_dir / f"{label}.png"
-        generate_image_with_comfly(prompt, output, settings)
         generated.append(output)
+        requests.append(ImageRenderRequest(prompt=prompt, output_path=output))
+    router.render_batch(requests)
     return generated_cover, generated
 
 
@@ -1190,6 +1197,7 @@ def main() -> int:
     parser.add_argument("--llm-model", default="", help="Chat model override for fallback planner")
     parser.add_argument("--prompt-storage", choices=["dual", "single"], default="dual")
     parser.add_argument("--metadata-level", choices=["verbose", "minimal"], default="verbose")
+    parser.add_argument("--image-provider", choices=["auto", "comfly", "openrouter"], default="auto")
     parser.add_argument(
         "--render-series-limit",
         type=int,
@@ -1254,6 +1262,7 @@ def main() -> int:
             skills_root=skills_root,
             model_override=args.model.strip(),
             render_series_limit=max(0, args.render_series_limit),
+            image_provider=args.image_provider,
         )
 
     summary = {

@@ -4,12 +4,13 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any
 
 
-SHRINK_IN_ANIMATION = {
+ZOOM_IN_SHRINK = {
     "resource_id": "6798332584276267527",
     "category_name": "入场",
     "id": "624755",
@@ -18,13 +19,98 @@ SHRINK_IN_ANIMATION = {
     "platform": "all",
     "request_id": "",
     "category_id": "ruchang",
-    "duration": 500000,
+    "duration": 360000,
     "name": "缩小",
     "panel": "video",
     "start": 0,
     "type": "in",
     "anim_adjust_params": None,
 }
+
+ZOOM_IN_LIGHT = {
+    "resource_id": "6800268825611735559",
+    "category_name": "入场",
+    "id": "629085",
+    "material_type": "video",
+    "path": "",
+    "platform": "all",
+    "request_id": "",
+    "category_id": "ruchang",
+    "duration": 420000,
+    "name": "轻微放大",
+    "panel": "video",
+    "start": 0,
+    "type": "in",
+    "anim_adjust_params": None,
+}
+
+ZOOM_OUT_SHRINK = {
+    "resource_id": "6798332648814023181",
+    "category_name": "出场",
+    "id": "624753",
+    "material_type": "video",
+    "path": "",
+    "platform": "all",
+    "request_id": "",
+    "category_id": "chuchang",
+    "duration": 320000,
+    "name": "缩小",
+    "panel": "video",
+    "start": 0,
+    "type": "out",
+    "anim_adjust_params": None,
+}
+
+ZOOM_OUT_LIGHT = {
+    "resource_id": "6800268611807089166",
+    "category_name": "出场",
+    "id": "629083",
+    "material_type": "video",
+    "path": "",
+    "platform": "all",
+    "request_id": "",
+    "category_id": "chuchang",
+    "duration": 360000,
+    "name": "轻微放大",
+    "panel": "video",
+    "start": 0,
+    "type": "out",
+    "anim_adjust_params": None,
+}
+
+GROUP_ZOOM_II = {
+    "resource_id": "6779083172429697544",
+    "category_name": "组合",
+    "id": "493000",
+    "material_type": "video",
+    "path": "",
+    "platform": "all",
+    "request_id": "",
+    "category_id": "zuhe",
+    "duration": 14000000,
+    "name": "缩放 II",
+    "panel": "video",
+    "start": 0,
+    "type": "group",
+    "anim_adjust_params": None,
+}
+
+
+def _resolve_binary(name: str) -> str:
+    candidate = shutil.which(name)
+    if candidate:
+        return candidate
+    common = {
+        "ffprobe": ["/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe"],
+    }
+    for raw in common.get(name, []):
+        path = Path(raw)
+        if path.exists():
+            return str(path)
+    return name
+
+
+FFPROBE_BIN = _resolve_binary("ffprobe")
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -40,7 +126,7 @@ def _write_payload_to_all(draft_dir: Path, payload: dict[str, Any]) -> None:
 def probe_duration_us(audio_path: Path) -> int:
     out = subprocess.check_output(
         [
-            "ffprobe",
+            FFPROBE_BIN,
             "-v",
             "error",
             "-show_entries",
@@ -68,7 +154,7 @@ def _iter_video_segments(data: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def apply_light_zoom(data: dict[str, Any], zoom_hi: float = 1.03, zoom_lo: float = 1.0) -> dict[str, Any]:
+def apply_light_zoom(data: dict[str, Any], zoom_hi: float = 1.045, zoom_lo: float = 1.015) -> dict[str, Any]:
     materials = data.setdefault("materials", {})
     mat_animations = materials.setdefault("material_animations", [])
     video_segments = _iter_video_segments(data)
@@ -83,10 +169,12 @@ def apply_light_zoom(data: dict[str, Any], zoom_hi: float = 1.03, zoom_lo: float
         scale["y"] = target
         changed += 1
 
+        in_animation = dict(ZOOM_IN_SHRINK if idx % 2 == 0 else ZOOM_IN_LIGHT)
+        out_animation = dict(ZOOM_OUT_LIGHT if idx % 2 == 0 else ZOOM_OUT_SHRINK)
         anim_id = uuid.uuid4().hex
         mat_animations.append(
             {
-                "animations": [dict(SHRINK_IN_ANIMATION)],
+                "animations": [in_animation, out_animation],
                 "id": anim_id,
                 "multi_language_current": "none",
                 "type": "sticker_animation",
@@ -96,7 +184,51 @@ def apply_light_zoom(data: dict[str, Any], zoom_hi: float = 1.03, zoom_lo: float
         refs.append(anim_id)
         anim_added += 1
 
-    return {"changed_segments": changed, "added_animations": anim_added}
+    return {
+        "preset": "zoom_combo",
+        "changed_segments": changed,
+        "added_animations": anim_added,
+        "zoom_hi": zoom_hi,
+        "zoom_lo": zoom_lo,
+    }
+
+
+def apply_group_zoom_ii(data: dict[str, Any], base_scale: float = 1.01) -> dict[str, Any]:
+    materials = data.setdefault("materials", {})
+    mat_animations = materials.setdefault("material_animations", [])
+    video_segments = _iter_video_segments(data)
+
+    changed = 0
+    anim_added = 0
+    for seg in video_segments:
+        clip = seg.setdefault("clip", {})
+        scale = clip.setdefault("scale", {"x": 1.0, "y": 1.0})
+        scale["x"] = base_scale
+        scale["y"] = base_scale
+        changed += 1
+
+        anim = dict(GROUP_ZOOM_II)
+        duration = int((seg.get("target_timerange") or {}).get("duration", 0) or 0)
+        if duration > 0:
+            anim["duration"] = duration
+        anim_id = uuid.uuid4().hex
+        mat_animations.append(
+            {
+                "animations": [anim],
+                "id": anim_id,
+                "multi_language_current": "none",
+                "type": "sticker_animation",
+            }
+        )
+        seg.setdefault("extra_material_refs", []).append(anim_id)
+        anim_added += 1
+
+    return {
+        "preset": "zoom_group_ii",
+        "changed_segments": changed,
+        "added_animations": anim_added,
+        "base_scale": base_scale,
+    }
 
 
 def _extract_speech_regions(data: dict[str, Any]) -> list[tuple[int, int]]:
@@ -191,7 +323,7 @@ def add_bgm_track(
     bgm_path: Path,
     total_us: int,
     speech_follow: bool = False,
-    speech_db: float = -23.0,
+    speech_db: float = -10.0,
     gap_db: float = -20.0,
     silence_gap_sec: float = 1.2,
 ) -> dict[str, Any]:
@@ -265,11 +397,15 @@ def add_bgm_track(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Enhance JianYing draft with light animation and BGM track")
     parser.add_argument("--draft-dir", required=True)
-    parser.add_argument("--animation-preset", default="flip_zoom", choices=["none", "flip_zoom"])
+    parser.add_argument(
+        "--animation-preset",
+        default="zoom_group_ii",
+        choices=["none", "flip_zoom", "zoom_combo", "zoom_group_ii"],
+    )
     parser.add_argument("--bgm-path", default="")
     parser.add_argument("--enable-bgm-speech-follow", action="store_true")
     parser.add_argument("--disable-bgm-speech-follow", action="store_true")
-    parser.add_argument("--bgm-speech-db", type=float, default=-23.0)
+    parser.add_argument("--bgm-speech-db", type=float, default=-10.0)
     parser.add_argument("--bgm-gap-db", type=float, default=-20.0)
     parser.add_argument("--silence-gap-sec", type=float, default=1.2)
     parser.add_argument("--json-report", default="")
@@ -288,8 +424,10 @@ def main() -> None:
         "warnings": [],
     }
 
-    if args.animation_preset == "flip_zoom":
+    if args.animation_preset in {"flip_zoom", "zoom_combo"}:
         report["animation"] = apply_light_zoom(data)
+    elif args.animation_preset == "zoom_group_ii":
+        report["animation"] = apply_group_zoom_ii(data)
 
     if args.bgm_path:
         bgm_path = Path(args.bgm_path).expanduser().resolve()

@@ -42,6 +42,8 @@ npx -y bun ./scripts/wechat-browser.ts --intent imagepost --markdown post.md --i
 - `--intent imagepost` 下，`--markdown` 默认只提取标题，不自动把 markdown 正文灌进内容编辑器。
 - 只有显式传 `--content`，或显式加 `--with-markdown-content`，才会写正文。
 - 纯贴图发布优先使用 `--title + --images`。
+- 新增硬门槛：只有检测到 `#js_content_top .image-selector` 顶部图片区，才继续执行贴图发布。
+- 若公众号后台从 `贴图` 入口落到 legacy 正文/封面编辑壳，脚本会直接失败并返回 `LEGACY_IMAGEPOST_FLOW`，不再假装成功保存成“图文”。
 
 This skill provides independent browser automation for WeChat publishing, using `aki-context-to-html` as the style generation backend.
 

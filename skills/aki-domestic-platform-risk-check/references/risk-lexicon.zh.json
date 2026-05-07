@@ -1,0 +1,272 @@
+{
+  "version": "2026-04-29",
+  "note": "非官方平台风险词库，用于小红书、抖音、微信公众号、视频号等中文自媒体发布前的风控预检。",
+  "rules": [
+    {
+      "term": "追捧支持",
+      "severity": "low",
+      "category": "情绪化表达",
+      "reason": "组合后容易显得追星化，可改成中性平台表达。",
+      "suggestions": ["持续支持", "共同支持", "加码支持"]
+    },
+    {
+      "term": "封号严重",
+      "severity": "high",
+      "category": "账号风控",
+      "reason": "直接描述账号处罚，容易触发平台风控语境。",
+      "suggestions": ["账号风控偏严格", "账号使用限制更多", "稳定性风险更高"]
+    },
+    {
+      "term": "封号",
+      "severity": "high",
+      "category": "账号风控",
+      "reason": "账号处罚类词，发布前建议弱化。",
+      "suggestions": ["账号风控", "账号限制", "使用门槛"]
+    },
+    {
+      "term": "封禁",
+      "severity": "high",
+      "category": "账号风控",
+      "reason": "账号处罚类词，发布前建议弱化。",
+      "suggestions": ["限制", "管控", "风控"]
+    },
+    {
+      "term": "封杀",
+      "severity": "high",
+      "category": "攻击/处罚",
+      "reason": "对抗和处罚意味强，容易显得过激。",
+      "suggestions": ["限制", "排除", "不再支持"]
+    },
+    {
+      "term": "下注",
+      "severity": "high",
+      "category": "博彩/投机化表达",
+      "reason": "带有赌博和投机意味，标题中尤其建议替换。",
+      "suggestions": ["加码", "投入", "支持", "重仓"]
+    },
+    {
+      "term": "押注",
+      "severity": "high",
+      "category": "博彩/投机化表达",
+      "reason": "带有赌博和投机意味，发布前建议替换。",
+      "suggestions": ["加码", "投入", "支持", "选择"]
+    },
+    {
+      "term": "死敌",
+      "severity": "high",
+      "category": "攻击/敌对表达",
+      "reason": "敌对和攻击意味强，平台文案可改成竞争关系。",
+      "suggestions": ["主要对手", "直接竞争者", "竞争对手"]
+    },
+    {
+      "term": "围剿",
+      "severity": "high",
+      "category": "攻击/冲突表达",
+      "reason": "冲突感过强，容易放大对抗语境。",
+      "suggestions": ["形成压力", "共同竞争", "多方夹击"]
+    },
+    {
+      "term": "血洗",
+      "severity": "high",
+      "category": "暴力/冲突表达",
+      "reason": "暴力色彩强，建议避免。",
+      "suggestions": ["重塑", "改写", "冲击"]
+    },
+    {
+      "term": "干死",
+      "severity": "high",
+      "category": "暴力/攻击表达",
+      "reason": "暴力和攻击意味明显，发布前必须替换。",
+      "suggestions": ["打败", "压制", "超越"]
+    },
+    {
+      "term": "暴雷",
+      "severity": "high",
+      "category": "恐慌/负面金融表达",
+      "reason": "容易制造恐慌或负面金融联想。",
+      "suggestions": ["出现风险", "问题暴露", "承压"]
+    },
+    {
+      "term": "爆雷",
+      "severity": "high",
+      "category": "恐慌/负面金融表达",
+      "reason": "容易制造恐慌或负面金融联想。",
+      "suggestions": ["出现风险", "问题暴露", "承压"]
+    },
+    {
+      "term": "跑路",
+      "severity": "high",
+      "category": "诈骗/负面金融表达",
+      "reason": "诈骗和资金风险联想强，除非必要不建议使用。",
+      "suggestions": ["退出", "撤离", "停止服务"]
+    },
+    {
+      "term": "割韭菜",
+      "severity": "high",
+      "category": "诈骗/收割表达",
+      "reason": "强负面和诈骗语境，容易触发审核。",
+      "suggestions": ["过度收费", "变现过重", "用户成本过高"]
+    },
+    {
+      "term": "孤立无援",
+      "severity": "medium",
+      "category": "极端处境表达",
+      "reason": "情绪化和极端化明显，建议弱化。",
+      "suggestions": ["处境更被动", "压力变大", "支持面变窄"]
+    },
+    {
+      "term": "孤军奋战",
+      "severity": "medium",
+      "category": "极端处境表达",
+      "reason": "冲突感较强，可改成中性判断。",
+      "suggestions": ["独立承压", "独自面对压力", "更依赖自身资源"]
+    },
+    {
+      "term": "卖身契",
+      "severity": "medium",
+      "category": "贬损/隐喻表达",
+      "reason": "贬损意味明显，商业协议语境中建议替换。",
+      "suggestions": ["独家绑定协议", "旧协议", "深度绑定关系"]
+    },
+    {
+      "term": "跪了",
+      "severity": "medium",
+      "category": "标题党/贬损表达",
+      "reason": "情绪化强，容易显得低质或攻击。",
+      "suggestions": ["转向了", "加码了", "关系变了"]
+    },
+    {
+      "term": "没落",
+      "severity": "medium",
+      "category": "极端衰退表达",
+      "reason": "结论过重，建议换成趋势观察。",
+      "suggestions": ["被继续追赶", "增长承压", "优势被削弱"]
+    },
+    {
+      "term": "崩了",
+      "severity": "medium",
+      "category": "恐慌/标题党表达",
+      "reason": "夸张负面，容易制造恐慌。",
+      "suggestions": ["承压", "出现变化", "不再稳固"]
+    },
+    {
+      "term": "金主",
+      "severity": "medium",
+      "category": "资金依附表达",
+      "reason": "口语化且带依附意味，商业关系中建议中性化。",
+      "suggestions": ["重要合作方", "主要支持方", "核心伙伴"]
+    },
+    {
+      "term": "大金主",
+      "severity": "medium",
+      "category": "资金依附表达",
+      "reason": "口语化且带依附意味，商业关系中建议中性化。",
+      "suggestions": ["重要合作方", "主要支持方", "核心伙伴"]
+    },
+    {
+      "term": "砸钱",
+      "severity": "medium",
+      "category": "资金/标题党表达",
+      "reason": "粗糙和夸张，建议改成中性商业动作。",
+      "suggestions": ["投入资金", "加大投入", "继续加码"]
+    },
+    {
+      "term": "吊打",
+      "severity": "medium",
+      "category": "攻击/夸张表达",
+      "reason": "贬损和攻击意味明显。",
+      "suggestions": ["明显领先", "表现更强", "优势更明显"]
+    },
+    {
+      "term": "碾压",
+      "severity": "medium",
+      "category": "攻击/夸张表达",
+      "reason": "冲突感强，容易显得过度夸张。",
+      "suggestions": ["明显领先", "优势更明显", "压过"]
+    },
+    {
+      "term": "完爆",
+      "severity": "medium",
+      "category": "攻击/夸张表达",
+      "reason": "标题党和贬损感强。",
+      "suggestions": ["明显优于", "表现更好", "更有优势"]
+    },
+    {
+      "term": "唯一",
+      "severity": "medium",
+      "category": "绝对化用语",
+      "reason": "绝对化表达，商业/推荐内容中建议谨慎。",
+      "suggestions": ["少数", "重要", "主要"]
+    },
+    {
+      "term": "第一",
+      "severity": "medium",
+      "category": "绝对化用语",
+      "reason": "排名类绝对表达，缺少依据时建议弱化。",
+      "suggestions": ["领先", "靠前", "很强"]
+    },
+    {
+      "term": "最强",
+      "severity": "medium",
+      "category": "绝对化用语",
+      "reason": "绝对化表达，容易被判夸大。",
+      "suggestions": ["很强", "表现突出", "优势明显"]
+    },
+    {
+      "term": "最好",
+      "severity": "medium",
+      "category": "绝对化用语",
+      "reason": "绝对化表达，建议改成场景化判断。",
+      "suggestions": ["更适合", "更稳妥", "体验更好"]
+    },
+    {
+      "term": "绝对",
+      "severity": "medium",
+      "category": "绝对化用语",
+      "reason": "绝对化表达，商业/推荐语境中建议避免。",
+      "suggestions": ["更可能", "相对", "通常"]
+    },
+    {
+      "term": "保证",
+      "severity": "medium",
+      "category": "承诺性表达",
+      "reason": "承诺意味强，容易形成夸大或保证效果。",
+      "suggestions": ["有助于", "更容易", "通常可以"]
+    },
+    {
+      "term": "100%",
+      "severity": "medium",
+      "category": "绝对化用语",
+      "reason": "绝对化数字承诺，建议避免。",
+      "suggestions": ["大概率", "多数情况下", "更稳"]
+    },
+    {
+      "term": "分手",
+      "severity": "low",
+      "category": "口语化关系表达",
+      "reason": "可作为标题表达，但发布前可中性化。",
+      "suggestions": ["关系重写", "合作调整", "协议重写"]
+    },
+    {
+      "term": "官宣",
+      "severity": "low",
+      "category": "平台口语",
+      "reason": "通常可用，但严肃商业信息中可更准确。",
+      "suggestions": ["正式宣布", "确认", "披露"]
+    },
+    {
+      "term": "更搞笑的是",
+      "severity": "low",
+      "category": "嘲讽/口语化",
+      "reason": "容易显得嘲讽，建议改成观点提示。",
+      "suggestions": ["更值得关注的是", "更微妙的是", "更关键的是"]
+    },
+    {
+      "term": "追捧",
+      "severity": "low",
+      "category": "情绪化表达",
+      "reason": "略带情绪化，可按语境改成中性支持。",
+      "suggestions": ["支持", "加码", "持续投入"]
+    }
+  ]
+}

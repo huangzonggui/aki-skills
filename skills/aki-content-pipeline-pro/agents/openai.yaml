@@ -2,3 +2,19 @@ interface:
   display_name: "Aki Content Pipeline Pro"
   short_description: "Core-note co-creation pipeline for multi-platform distribution"
   default_prompt: "Run the full co-creation pipeline from sources to WeChat drafts and video package"
+  entrypoint: "python3 scripts/pipeline.py"
+  intents:
+    - init_topic
+    - ingest_sources
+    - summarize_core_note
+    - co_create_core_note
+    - approve_core_note
+    - derive_platform_copies
+    - generate_prompts
+    - render_images
+    - derive_video_scripts
+    - approve_video_scripts
+    - build_video_package
+    - publish_wechat_drafts
+    - resume
+    - rework

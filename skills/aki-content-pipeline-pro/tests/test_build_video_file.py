@@ -132,8 +132,8 @@ class BuildVideoFileTests(unittest.TestCase):
             "黄仁勋说，龙虾是下一个ChatGPT。现在很多Agent已经开始真的干活。"
         )
 
-        self.assertIn("Chat G P T", rewritten)
-        self.assertNotIn("ChatGPT", rewritten)
+        self.assertIn("ChatGPT", rewritten)
+        self.assertNotIn("Chat G P T", rewritten)
         self.assertIn("智能体", rewritten)
 
 

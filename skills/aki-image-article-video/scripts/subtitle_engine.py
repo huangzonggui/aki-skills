@@ -399,6 +399,45 @@ def _segments_to_srt(
     return out
 
 
+def _merge_sentence_fragments(
+    srt_segments: list[dict[str, Any]],
+    *,
+    max_chars: int,
+    max_duration: float,
+    max_gap_sec: float = 0.75,
+) -> list[dict[str, Any]]:
+    if not srt_segments:
+        return []
+
+    soft_max_chars = max(max_chars + 10, int(max_chars * 1.45))
+    soft_max_duration = max(max_duration + 1.2, max_duration * 1.5)
+    merged: list[dict[str, Any]] = []
+    idx = 0
+    while idx < len(srt_segments):
+        current = dict(srt_segments[idx])
+        current["text"] = str(current.get("text") or "")
+        current["char_len"] = int(current.get("char_len") or len(current["text"]))
+        while idx + 1 < len(srt_segments):
+            if current["text"] and current["text"][-1] in SENTENCE_PUNCT:
+                break
+            nxt = srt_segments[idx + 1]
+            gap = max(0.0, float(nxt["start"]) - float(current["end"]))
+            combined_text = f"{current['text']}{nxt['text']}"
+            combined_len = len(re.sub(r"\s+", "", combined_text))
+            combined_duration = float(nxt["end"]) - float(current["start"])
+            if gap > max_gap_sec:
+                break
+            if combined_len > soft_max_chars or combined_duration > soft_max_duration:
+                break
+            current["end"] = float(nxt["end"])
+            current["text"] = combined_text
+            current["char_len"] = combined_len
+            idx += 1
+        merged.append(current)
+        idx += 1
+    return merged
+
+
 def _nearest_boundary_error_ms(value: float, boundaries: list[float]) -> float:
     if not boundaries:
         return 0.0
@@ -479,6 +518,11 @@ def _build_once(
         comma_min_chars=comma_min_chars,
     )
     srt_segments = _segments_to_srt(script_text=script_text, chars=aligned_chars, segments=refined)
+    srt_segments = _merge_sentence_fragments(
+        srt_segments,
+        max_chars=max_chars,
+        max_duration=max_duration,
+    )
     report = _calc_report(
         srt_segments=srt_segments,
         boundaries=boundaries,
@@ -497,8 +541,8 @@ def generate_aligned_srt(
     whisper_model: str = "small",
     whisper_language: str = "zh",
     qa_policy: str = "strict",
-    max_chars: int = 26,
-    max_duration: float = 3.2,
+    max_chars: int = 34,
+    max_duration: float = 4.6,
     gap_sec: float = 0.5,
     comma_min_chars: int = 50,
 ) -> dict[str, Any]:
@@ -563,8 +607,8 @@ def main() -> None:
     parser.add_argument("--whisper-model", default="small")
     parser.add_argument("--whisper-language", default="zh")
     parser.add_argument("--qa-policy", choices=["strict", "medium", "off"], default="strict")
-    parser.add_argument("--max-chars", type=int, default=26)
-    parser.add_argument("--max-duration", type=float, default=3.2)
+    parser.add_argument("--max-chars", type=int, default=34)
+    parser.add_argument("--max-duration", type=float, default=4.6)
     parser.add_argument("--gap-sec", type=float, default=0.5)
     parser.add_argument("--comma-min-chars", type=int, default=50)
     parser.add_argument("--json-report", default="")

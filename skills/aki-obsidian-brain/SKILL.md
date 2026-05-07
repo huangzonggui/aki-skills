@@ -18,7 +18,12 @@ description: Aki 的个人 Obsidian 总控技能。以 /Users/aki/Documents/Obsi
 - 内容系统目录：`00-Aki第二大脑/`
 
 配置文件：`config.json`
-写入前规则源：`00-Aki第二大脑/工具与服务/Obsidian智能写入规则.md`
+写入前规则源：`08-系统与工具/数字资产系统/Obsidian智能写入规则.md`
+
+Agent 上下文源：
+- 进入 Vault 时读取根目录 `AGENTS.md` 的 `context.system_architecture`，并将其指向的系统架构文档作为默认上下文加载。
+- 同时解析 `context.domains`，但不默认加载所有领域文档。
+- 当用户问题命中某个领域的 `scope` 或 `load_triggers`，再读取该领域的 `index`，按领域索引继续渐进式加载。
 
 ## 触发场景
 
@@ -32,7 +37,7 @@ description: Aki 的个人 Obsidian 总控技能。以 /Users/aki/Documents/Obsi
   - `- [ ] [Q1] 任务内容｜记录: YYYY-MM-DD HH:MM｜标签: #todo #q1`
 - 灵感池：`00-Aki第二大脑/灵感池.md`
   - `- [ ] 灵感内容｜记录: ...｜标签: #idea`
-- 选题库：`00-Aki第二大脑/选题库.md`
+- 选题库：`04-自媒体/选题库.md`
   - `- [ ] 话题标题｜记录: ...｜标签: #topic #ai-tech｜引用: [原文链接](URL)`
   - 可选补充：`｜动机: ...`
 - 不写入任何 `来源: 飞书/OpenClaw` 之类的输入端标记。
@@ -88,7 +93,7 @@ python3 ./scripts/brain_router.py --init-only
 
 ```bash
 obsidian vault="Aki数字资产" search query="OpenClaw"
-obsidian vault="Aki数字资产" read path="00-Aki第二大脑/选题库.md"
+obsidian vault="Aki数字资产" read path="04-自媒体/选题库.md"
 obsidian vault="Aki数字资产" open path="00-Aki第二大脑/任务清单.md"
 ```
 

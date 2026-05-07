@@ -16,6 +16,7 @@ STEP_ORDER = [
     "generate_prompts",
     "render_images",
     "derive_video_scripts",
+    "approve_video_scripts",
     "build_video_package",
     "publish_wechat_drafts",
 ]

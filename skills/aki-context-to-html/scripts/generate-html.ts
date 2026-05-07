@@ -248,7 +248,11 @@ function formatInlineMarkdown(text: string): string {
   return formatted;
 }
 
-function preConvertMarkdownToHtml(articleText: string): string {
+function markdownImageToHtml(altText: string, src: string): string {
+  return `<img src="${escapeHtml(src.trim())}" alt="${escapeHtml(altText.trim())}">`;
+}
+
+export function preConvertMarkdownToHtml(articleText: string): string {
   const codeBlocks: string[] = [];
   let codeBlockIndex = 0;
 
@@ -266,6 +270,7 @@ function preConvertMarkdownToHtml(articleText: string): string {
   );
 
   preConverted = preConverted
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_match, altText: string, src: string) => markdownImageToHtml(altText, src))
     .replace(/^#\s+(.+)$/gm, (_, text: string) => `<h1>${formatInlineMarkdown(text)}</h1>`)
     .replace(/^##\s+(.+)$/gm, (_, text: string) => `<h2>${formatInlineMarkdown(text)}</h2>`)
     .replace(/^###\s+(.+)$/gm, (_, text: string) => `<h3>${formatInlineMarkdown(text)}</h3>`)
@@ -280,7 +285,7 @@ function preConvertMarkdownToHtml(articleText: string): string {
     .map(line => {
       const trimmed = line.trim();
       if (!trimmed) return '';
-      if (/^<(h[1-6]|ul|ol|li|blockquote|pre|hr)/.test(trimmed)) {
+      if (/^<(h[1-6]|ul|ol|li|blockquote|pre|hr|img)/.test(trimmed)) {
         return trimmed;
       }
       if (/^@@CODE_BLOCK_\d+@@$/.test(trimmed)) {
@@ -600,7 +605,7 @@ function splitGuideHeading(innerHtml: string): { main: string; kicker: string } 
   return { main: trimmed, kicker: '' };
 }
 
-function decorateGuideSections(html: string): string {
+export function decorateGuideSections(html: string): string {
   let sectionIndex = 0;
 
   return html.replace(/<h2([^>]*)>([\s\S]*?)<\/h2>/gi, (fullMatch, attributes: string, innerHtml: string) => {
@@ -613,7 +618,7 @@ function decorateGuideSections(html: string): string {
     const sectionNumber = String(sectionIndex).padStart(2, '0');
     const kickerHtml = kicker ? `<span class="section-kicker">${kicker}</span>` : '';
 
-    return `<h2${attributes}><span class="section-side"><span class="section-number">${sectionNumber}</span><span class="section-part">PART</span></span><span class="section-copy"><span class="section-main">${main}</span>${kickerHtml}</span></h2>`;
+    return `<h2${attributes}><span class="section-side"><span class="section-number">${sectionNumber}</span></span><span class="section-copy"><span class="section-main">${main}</span>${kickerHtml}</span></h2>`;
   });
 }
 
@@ -788,7 +793,9 @@ async function main(): Promise<void> {
   console.error('  Open in browser to view and export PNG slices');
 }
 
-main().catch((err) => {
-  console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  });
+}

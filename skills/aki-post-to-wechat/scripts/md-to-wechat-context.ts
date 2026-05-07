@@ -27,6 +27,10 @@ interface ParseOptions {
   style?: string;
 }
 
+function makeImagePlaceholder(index: number): string {
+  return `AKIIMAGEPLACEHOLDER${index}`;
+}
+
 function loadEnvFile(dotenvPath: string): void {
   if (!fs.existsSync(dotenvPath)) return;
   const lines = fs.readFileSync(dotenvPath, 'utf-8').split('\n');
@@ -446,11 +450,11 @@ function normalizePlaceholderBlocks(contentHtml: string): string {
   let html = contentHtml;
 
   // Convert any plain placeholder token to a standalone paragraph.
-  html = html.replace(/\bIMAGE_PLACEHOLDER_\d+\b/g, (m) => `<p>${m}</p>`);
+  html = html.replace(/\b(?:IMAGE_PLACEHOLDER_\d+|AKIIMAGEPLACEHOLDER\d+)\b/g, (m) => `<p>${m}</p>`);
 
   // Collapse accidental nested <p><p>PLACEHOLDER</p></p>.
-  html = html.replace(/<p[^>]*>\s*<p>\s*(IMAGE_PLACEHOLDER_\d+)\s*<\/p>\s*<\/p>/gi, '<p>$1</p>');
-  html = html.replace(/<p>\s*(IMAGE_PLACEHOLDER_\d+)\s*<\/p>\s*<p>\s*\1\s*<\/p>/gi, '<p>$1</p>');
+  html = html.replace(/<p[^>]*>\s*<p>\s*((?:IMAGE_PLACEHOLDER_\d+|AKIIMAGEPLACEHOLDER\d+))\s*<\/p>\s*<\/p>/gi, '<p>$1</p>');
+  html = html.replace(/<p>\s*((?:IMAGE_PLACEHOLDER_\d+|AKIIMAGEPLACEHOLDER\d+))\s*<\/p>\s*<p>\s*\1\s*<\/p>/gi, '<p>$1</p>');
 
   return html;
 }
@@ -503,7 +507,7 @@ async function parseMarkdownWithContext(markdownPath: string, options?: ParseOpt
   const images: Array<{ src: string; placeholder: string }> = [];
   let imageCounter = 0;
   const modifiedBody = body.replace(/!\[[^\]]*\]\(([^)]+)\)/g, (_match, src) => {
-    const placeholder = `IMAGE_PLACEHOLDER_${++imageCounter}`;
+    const placeholder = makeImagePlaceholder(++imageCounter);
     images.push({ src, placeholder });
     return placeholder;
   });

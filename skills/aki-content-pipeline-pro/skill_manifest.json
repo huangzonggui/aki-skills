@@ -1,0 +1,43 @@
+{
+  "name": "aki-content-pipeline-pro",
+  "version": "1.0.0",
+  "description": "AI-powered content creation pipeline: input links + opinions → AI draft → hand-drawn images → multi-platform copies → video scripts → WeChat publish",
+  "skills": {
+    "core": {
+      "description": "Text summarization + hand-drawn image generation",
+      "items": [
+        "aki-text-note-summarizer",
+        "aki-deai-writing",
+        "aki-handnote-cover",
+        "aki-dense-handnote-series"
+      ]
+    },
+    "full": {
+      "description": "Core + video scripts + jianying drafts + WeChat publish",
+      "items": [
+        "youtube-clipper",
+        "aki-text-note-summarizer",
+        "aki-handnote-cover",
+        "aki-dense-handnote-series",
+        "aki-adaptive-video-script-style",
+        "aki-image-article-video",
+        "aki-wechat-api-imagepost",
+        "aki-domestic-platform-risk-check",
+        "aki-deai-writing",
+        "aki-context-to-html",
+        "jianying-editor"
+      ]
+    }
+  },
+  "external_dependencies": {
+    "comfly_api": "Required for image generation. COMFLY_API_KEY from https://ai.comfly.chat",
+    "ffmpeg": "Required for video export (full only). System install.",
+    "jianying_pro": "Required for video drafts (full only). macOS/Windows app.",
+    "yt_dlp": "Required for YouTube sources (optional). pip install yt-dlp."
+  },
+  "config": {
+    "primary": "~/.config/ai/keys.env",
+    "legacy": "~/.config/comfly/config",
+    "template": "config/keys.env.example"
+  }
+}

@@ -43,7 +43,7 @@ from aki_runtime import default_publish_profile, skill_path  # noqa: E402
 BOOTSTRAP = SCRIPT_DIR / "bootstrap_topic.py"
 COLLECT = SCRIPT_DIR / "collect_sources.py"
 RENDER = SCRIPT_DIR / "render_images.py"
-PUBLISH = SCRIPT_DIR / "publish_wechat_browser.py"
+PUBLISH = SCRIPT_DIR / "publish_wechat_api.py"
 VIDEO = SCRIPT_DIR / "build_video_file.py"
 
 SUMMARIZER_SKILL = skill_path("aki-text-note-summarizer", "SKILL.md", repo_root_path=REPO_ROOT)
@@ -103,6 +103,14 @@ CORE_NOTE_APPROVAL_BLOCKED_MESSAGE = (
     "等待人工确认 core_note.md。请先查看 core_note.draft.md，整理并更新 core_note.md，"
     "再重新执行 approve_core_note。确认前不会继续生成 outline 和平台裂变内容。"
 )
+VIDEO_SCRIPTS_APPROVAL_BLOCKED_MESSAGE = (
+    "等待人工确认视频脚本。请先检查并修改 video/<platform>/voice_*.md，"
+    "确认后再重新执行 approve_video_scripts。确认前不会继续生成视频包。"
+)
+DEFAULT_VIDEO_TARGET_TOTAL_SEC = 30.0
+DEFAULT_VIDEO_COVER_SEC = 4.0
+MIN_VIDEO_SEGMENT_SEC = 4.5
+MAX_VIDEO_SEGMENT_SEC = 12.0
 
 
 def _require_done(topic_root: Path, steps: list[str], hint: str = "") -> None:
@@ -178,6 +186,90 @@ def _ensure_core_note_approval_current(topic_root: Path, layout) -> None:
             message="core_note.md 在批准后又被修改了。请重新确认母稿，并再次执行 approve_core_note。",
             reason="core note changed after approval",
         )
+
+
+def _video_script_signature(layout, platform: str) -> dict[str, str | int]:
+    voice_path = layout.video_voice_script_path(platform)
+    tts_path = layout.video_voice_tts_script_path(platform)
+    if not voice_path.exists():
+        raise FileNotFoundError(f"Voice script missing: {voice_path}")
+    if not tts_path.exists():
+        raise FileNotFoundError(f"TTS voice script missing: {tts_path}")
+    voice_text = voice_path.read_text(encoding="utf-8", errors="ignore").strip()
+    tts_text = tts_path.read_text(encoding="utf-8", errors="ignore").strip()
+    return {
+        "voice_sha256": _sha256_text(voice_text),
+        "voice_char_count": len(voice_text),
+        "tts_sha256": _sha256_text(tts_text),
+        "tts_char_count": len(tts_text),
+    }
+
+
+def _block_video_scripts_approval(topic_root: Path, layout, platforms: list[str], message: str, reason: str) -> None:
+    invalidate_from_step(topic_root, "approve_video_scripts", reason=reason)
+    set_step(
+        topic_root,
+        "approve_video_scripts",
+        BLOCKED,
+        message=message,
+        meta={
+            "platforms": platforms,
+            "voice_paths": {platform: str(layout.video_voice_script_path(platform)) for platform in platforms},
+            "tts_paths": {platform: str(layout.video_voice_tts_script_path(platform)) for platform in platforms},
+        },
+    )
+
+
+def _ensure_video_scripts_approval_current(topic_root: Path, layout, platforms: list[str]) -> None:
+    state = load_state(topic_root)
+    approval = state["steps"].get("approve_video_scripts", {})
+    if approval.get("status") != DONE:
+        return
+    approved_signatures = dict((approval.get("meta") or {}).get("signatures") or {})
+    if not approved_signatures:
+        _block_video_scripts_approval(
+            topic_root,
+            layout,
+            platforms=platforms,
+            message="这次视频脚本批准记录缺少签名。请重新确认脚本，并再次执行 approve_video_scripts。",
+            reason="video script approval missing signature",
+        )
+        return
+
+    for platform in platforms:
+        try:
+            current_signature = _video_script_signature(layout, platform)
+        except FileNotFoundError:
+            _block_video_scripts_approval(
+                topic_root,
+                layout,
+                platforms=platforms,
+                message="视频脚本文件已缺失。请重新生成或整理脚本后，再执行 approve_video_scripts。",
+                reason="approved video scripts missing",
+            )
+            return
+        approved_signature = dict(approved_signatures.get(platform) or {})
+        if not approved_signature:
+            _block_video_scripts_approval(
+                topic_root,
+                layout,
+                platforms=platforms,
+                message="这次视频脚本批准记录不完整。请重新确认脚本，并再次执行 approve_video_scripts。",
+                reason="video script approval missing platform signature",
+            )
+            return
+        if (
+            current_signature["voice_sha256"] != str(approved_signature.get("voice_sha256") or "")
+            or current_signature["tts_sha256"] != str(approved_signature.get("tts_sha256") or "")
+        ):
+            _block_video_scripts_approval(
+                topic_root,
+                layout,
+                platforms=platforms,
+                message="视频脚本在批准后又被修改了。请重新确认脚本，并再次执行 approve_video_scripts。",
+                reason="video scripts changed after approval",
+            )
+            return
 
 
 def _ensure_topic_root(topic_root: str) -> Path:
@@ -755,13 +847,26 @@ def _page_source_text(page: dict) -> str:
     return "\n\n".join(part for part in blocks if part).strip()
 
 
-def _estimate_segment_duration(segment_kind: str, char_count: int) -> float:
-    if segment_kind == "cover":
-        return 4.0
-    base = max(7.0, min(18.0, round(char_count / 55.0, 1)))
-    if segment_kind == "ending":
-        return min(base, 10.0)
-    return base
+def _allocate_video_segment_durations(
+    page_count: int,
+    total_sec: float = DEFAULT_VIDEO_TARGET_TOTAL_SEC,
+    cover_sec: float = DEFAULT_VIDEO_COVER_SEC,
+) -> tuple[float, list[float]]:
+    safe_cover = round(max(3.0, min(cover_sec, total_sec)), 1)
+    if page_count <= 0:
+        return safe_cover, []
+
+    target_total = min(total_sec, safe_cover + page_count * MAX_VIDEO_SEGMENT_SEC)
+    remaining = max(0.0, target_total - safe_cover)
+    base = remaining / page_count if page_count else 0.0
+    base = max(MIN_VIDEO_SEGMENT_SEC, min(MAX_VIDEO_SEGMENT_SEC, round(base, 1)))
+    durations = [base] * page_count
+    diff = round(target_total - (safe_cover + sum(durations)), 1)
+    durations[-1] = round(
+        max(MIN_VIDEO_SEGMENT_SEC, min(MAX_VIDEO_SEGMENT_SEC, durations[-1] + diff)),
+        1,
+    )
+    return safe_cover, durations
 
 
 def _preferred_rendered_image(layout, platform: str, stem: str) -> Path:
@@ -783,12 +888,19 @@ def _generate_segment_script(
     if not ADAPTIVE_SCRIPT.exists():
         raise FileNotFoundError(f"Adaptive script generator missing: {ADAPTIVE_SCRIPT}")
     guidance = PLATFORM_VIDEO_GUIDANCE.get(platform, "")
+    segment_rule = (
+        "这是整条视频的前 3-5 秒封面 hook。第一句就要给抓手，优先用“新发布 / 价格变化 / 使用限制 / 翻车风险 / 数字清单”这几类切入。"
+        "不要先铺背景，不要讲废话，不要说‘今天聊聊’‘先说结论’。"
+        if segment_kind == "cover"
+        else "这是中段解释段。只解释当前图片绑定的一个重点，不要重新开场，不要重复整条视频的总标题。"
+    )
     payload = (
         f"平台说明：{guidance}\n\n"
         f"全局标题：{title}\n"
         f"当前段落类型：{segment_kind}\n"
         f"当前段落主题：{theme}\n"
         f"目标时长：{target_sec} 秒\n\n"
+        f"{segment_rule}\n\n"
         "请只围绕当前图片绑定的内容写这一段口播，不要抢后面图片的内容。\n\n"
         "当前段落素材如下：\n\n"
         f"{source_text.strip()}\n"
@@ -835,18 +947,7 @@ def _rewrite_segment_script_for_tts(script_text: str) -> str:
     def _normalize_tts_terms(line: str) -> str:
         normalized = line
         normalized = re.sub(r"(?i)(?<![A-Za-z])agents?(?![A-Za-z])", "智能体", normalized)
-        normalized = re.sub(r"(?i)(?<![A-Za-z])openclaw(?![A-Za-z])", "Open Claw", normalized)
-        normalized = re.sub(r"([a-z])([A-Z]{2,})", r"\1 \2", normalized)
-        normalized = re.sub(
-            r"(\d)([A-Z]{2,5})(?![A-Za-z])",
-            lambda match: f"{match.group(1)} {' '.join(match.group(2))}",
-            normalized,
-        )
-        normalized = re.sub(
-            r"(?<![A-Za-z])([A-Z]{2,5})(?![A-Za-z])",
-            lambda match: " ".join(match.group(1)),
-            normalized,
-        )
+        normalized = re.sub(r"(?i)(?<![A-Za-z])openclaw(?![A-Za-z])", "OpenClaw", normalized)
         normalized = re.sub(r"\s+", " ", normalized).strip()
         normalized = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", normalized)
         normalized = re.sub(r"\s+([，。！？；：])", r"\1", normalized)
@@ -913,6 +1014,59 @@ def _rewrite_segment_script_for_tts(script_text: str) -> str:
     return "\n".join(merged).strip()
 
 
+def _rewrite_voice_markdown_to_tts(voice_path: Path, tts_path: Path) -> None:
+    if not voice_path.exists():
+        raise FileNotFoundError(f"Voice script missing: {voice_path}")
+    raw = voice_path.read_text(encoding="utf-8", errors="ignore").strip()
+    if not raw:
+        raise RuntimeError(f"Voice script is empty: {voice_path}")
+
+    chunks = re.split(r"(?m)(?=^##\s+)", raw)
+    if not chunks:
+        raise RuntimeError(f"Voice script has invalid structure: {voice_path}")
+
+    header = chunks[0].strip()
+    if header.startswith("# "):
+        header = header.replace("口播脚本", "TTS口播脚本", 1)
+
+    blocks: list[str] = [header]
+    for chunk in chunks[1:]:
+        lines = chunk.strip().splitlines()
+        if not lines:
+            continue
+        split_index = None
+        for idx in range(1, len(lines)):
+            if not lines[idx].strip():
+                split_index = idx
+                break
+        if split_index is None:
+            prefix_lines = lines
+            body_text = ""
+        else:
+            prefix_lines = lines[:split_index]
+            body_text = "\n".join(lines[split_index + 1 :]).strip()
+
+        cleaned_lines: list[str] = []
+        for raw in body_text.splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            line = re.sub(r"^#{1,6}\s*", "", line)
+            line = re.sub(r"^[-*]\s*", "", line)
+            line = re.sub(r"^\d+[\.\)、]\s*", "", line)
+            line = re.sub(r"\s+", " ", line).strip()
+            line = re.sub(r"\s+([，。！？；：、])", r"\1", line)
+            if line:
+                cleaned_lines.append(line)
+        tts_body = "\n".join(cleaned_lines).strip()
+        block_parts = ["\n".join(prefix_lines).rstrip()]
+        if tts_body:
+            block_parts.extend(["", tts_body.strip()])
+        blocks.append("\n".join(block_parts).strip())
+
+    tts_path.write_text("\n\n".join(blocks).strip() + "\n", encoding="utf-8")
+
+
 def intent_init_topic(args: argparse.Namespace) -> int:
     cmd = [
         "--cwd",
@@ -933,8 +1087,6 @@ def intent_ingest_sources(args: argparse.Namespace) -> int:
     cmd = ["--topic-root", str(topic_root)]
     for item in args.source:
         cmd.extend(["--source", item])
-    if args.wechat_fetcher:
-        cmd.extend(["--wechat-fetcher", args.wechat_fetcher])
     if args.youtube_runner:
         cmd.extend(["--youtube-runner", args.youtube_runner])
     if args.youtube_download_script:
@@ -1143,6 +1295,8 @@ def intent_render_images(args: argparse.Namespace) -> int:
     ]
     if args.unit_cost is not None:
         cmd.extend(["--unit-cost", str(args.unit_cost)])
+    if args.image_provider:
+        cmd.extend(["--image-provider", str(args.image_provider)])
     return _run_python(RENDER, cmd)
 
 
@@ -1157,6 +1311,8 @@ def intent_derive_video_scripts(args: argparse.Namespace) -> int:
 
     set_step(topic_root, "derive_video_scripts", RUNNING, message=f"Generating bound video scripts for {', '.join(platforms)}")
     try:
+        pages = plan.get("pages") or []
+        cover_duration, page_durations = _allocate_video_segment_durations(len(pages))
         for platform in platforms:
             platform_dir = layout.video_platform_dir(platform)
             platform_dir.mkdir(parents=True, exist_ok=True)
@@ -1168,14 +1324,13 @@ def intent_derive_video_scripts(args: argparse.Namespace) -> int:
                     f"- Page {int(page['index']):02d}: {page['title']}" for page in (plan.get('pages') or [])
                 )
             )
-            cover_duration = int(round(_estimate_segment_duration("cover", 0)))
             cover_script = _generate_segment_script(
                 platform=platform,
                 title=str(plan.get("title") or layout.root.name),
                 segment_kind="cover",
                 theme=str(plan.get("title") or layout.root.name),
                 source_text=cover_source,
-                target_sec=cover_duration,
+                target_sec=int(round(cover_duration)),
                 model_override=args.model,
             )
             cover_tts_script = _rewrite_segment_script_for_tts(cover_script) or cover_script
@@ -1187,16 +1342,16 @@ def intent_derive_video_scripts(args: argparse.Namespace) -> int:
                     "image_relative": _relative_to_topic(topic_root, cover_image),
                     "kind": "cover",
                     "theme": str(plan.get("title") or layout.root.name),
-                    "duration_sec": float(cover_duration),
+                    "duration_sec": float(round(cover_duration, 1)),
                     "script": cover_script,
                     "tts_script": cover_tts_script,
                 }
             )
 
-            for page in plan.get("pages") or []:
+            for idx, page in enumerate(pages):
                 stem = f"series_{int(page['index']):02d}"
                 image_path = _preferred_rendered_image(layout, platform, stem)
-                duration = int(round(_estimate_segment_duration(str(page.get("kind") or "content"), int(page.get("char_count") or 0))))
+                duration = float(page_durations[idx]) if idx < len(page_durations) else MIN_VIDEO_SEGMENT_SEC
                 source_text = (
                     f"页面主题：{page['title']}\n"
                     f"页面角色：{', '.join(page.get('roles') or [])}\n\n"
@@ -1208,7 +1363,7 @@ def intent_derive_video_scripts(args: argparse.Namespace) -> int:
                     segment_kind=str(page.get("kind") or "content"),
                     theme=str(page.get("title") or ""),
                     source_text=source_text,
-                    target_sec=duration,
+                    target_sec=int(round(duration)),
                     model_override=args.model,
                 )
                 tts_script = _rewrite_segment_script_for_tts(script_text) or script_text
@@ -1220,7 +1375,7 @@ def intent_derive_video_scripts(args: argparse.Namespace) -> int:
                         "image_relative": _relative_to_topic(topic_root, image_path),
                         "kind": str(page.get("kind") or "content"),
                         "theme": str(page.get("title") or ""),
-                        "duration_sec": float(duration),
+                        "duration_sec": float(round(duration, 1)),
                         "script": script_text,
                         "tts_script": tts_script,
                         "page_index": int(page["index"]),
@@ -1260,15 +1415,18 @@ def intent_derive_video_scripts(args: argparse.Namespace) -> int:
                 tts_blocks.append(str(segment.get("tts_script") or segment["script"]).strip())
                 tts_blocks.append("")
             layout.video_voice_script_path(platform).write_text("\n".join(blocks).strip() + "\n", encoding="utf-8")
-            layout.video_voice_tts_script_path(platform).write_text(
-                "\n".join(tts_blocks).strip() + "\n",
-                encoding="utf-8",
-            )
             set_artifact(topic_root, f"video_timeline_{platform}", str(layout.video_timeline_path(platform)))
             set_artifact(topic_root, f"video_script_{platform}", str(layout.video_voice_script_path(platform)))
-            set_artifact(topic_root, f"video_tts_script_{platform}", str(layout.video_voice_tts_script_path(platform)))
+            if layout.video_voice_tts_script_path(platform).exists():
+                layout.video_voice_tts_script_path(platform).unlink()
 
-        invalidate_from_step(topic_root, "build_video_package", reason="video scripts regenerated")
+        _block_video_scripts_approval(
+            topic_root,
+            layout,
+            platforms=platforms,
+            message=VIDEO_SCRIPTS_APPROVAL_BLOCKED_MESSAGE,
+            reason="video scripts regenerated",
+        )
         set_step(
             topic_root,
             "derive_video_scripts",
@@ -1281,6 +1439,43 @@ def intent_derive_video_scripts(args: argparse.Namespace) -> int:
     except Exception as exc:
         set_step(topic_root, "derive_video_scripts", FAILED, message=str(exc))
         raise
+
+
+def intent_approve_video_scripts(args: argparse.Namespace) -> int:
+    topic_root = _ensure_topic_root(args.topic_root)
+    layout = resolve_layout(topic_root)
+    _ensure_core_note_approval_current(topic_root, layout)
+    _require_done(topic_root, ["derive_video_scripts"], hint="Generate and review video scripts first.")
+    mode = load_state(topic_root).get("mode", args.mode)
+    platforms = _parse_platforms(args.platforms, mode)
+
+    signatures: dict[str, dict[str, str | int]] = {}
+    for platform in platforms:
+        voice_path = layout.video_voice_script_path(platform)
+        tts_path = layout.video_voice_tts_script_path(platform)
+        if not voice_path.exists():
+            raise FileNotFoundError(f"Voice script missing: {voice_path}")
+        voice_text = voice_path.read_text(encoding="utf-8", errors="ignore").strip()
+        if len(voice_text) < 80:
+            raise RuntimeError(f"Voice script is too short; please revise before approval: {voice_path}")
+        _rewrite_voice_markdown_to_tts(voice_path, tts_path)
+        signatures[platform] = _video_script_signature(layout, platform)
+        set_artifact(topic_root, f"video_tts_script_{platform}", str(tts_path))
+
+    invalidate_from_step(topic_root, "build_video_package", reason="video scripts approved/updated")
+    set_step(
+        topic_root,
+        "approve_video_scripts",
+        DONE,
+        message="视频脚本已人工确认，现在可以继续生成视频包",
+        meta={
+            "platforms": platforms,
+            "signatures": signatures,
+            "voice_paths": {platform: str(layout.video_voice_script_path(platform)) for platform in platforms},
+            "tts_paths": {platform: str(layout.video_voice_tts_script_path(platform)) for platform in platforms},
+        },
+    )
+    return 0
 
 
 def intent_publish_wechat_drafts(args: argparse.Namespace) -> int:
@@ -1333,9 +1528,12 @@ def intent_publish_wechat_drafts(args: argparse.Namespace) -> int:
 
 def intent_build_video_package(args: argparse.Namespace) -> int:
     topic_root = _ensure_topic_root(args.topic_root)
-    _ensure_core_note_approval_current(topic_root, resolve_layout(topic_root))
-    _require_done(topic_root, ["derive_video_scripts"], hint="Generate timeline and voice scripts first.")
+    layout = resolve_layout(topic_root)
+    _ensure_core_note_approval_current(topic_root, layout)
     mode = load_state(topic_root).get("mode", args.mode)
+    platforms = _parse_platforms(args.platforms, mode)
+    _ensure_video_scripts_approval_current(topic_root, layout, platforms)
+    _require_done(topic_root, ["approve_video_scripts"], hint="Approve video scripts before building video package.")
     cmd = [
         "--topic-root",
         str(topic_root),
@@ -1358,8 +1556,13 @@ def intent_build_video_package(args: argparse.Namespace) -> int:
 
 def intent_resume(args: argparse.Namespace) -> int:
     topic_root = _ensure_topic_root(args.topic_root)
-    _ensure_core_note_approval_current(topic_root, resolve_layout(topic_root))
+    layout = resolve_layout(topic_root)
+    _ensure_core_note_approval_current(topic_root, layout)
     state = load_state(topic_root)
+    approved_video_platforms = list(((state.get("steps") or {}).get("approve_video_scripts") or {}).get("meta", {}).get("platforms") or [])
+    if approved_video_platforms:
+        _ensure_video_scripts_approval_current(topic_root, layout, approved_video_platforms)
+        state = load_state(topic_root)
     nxt = first_incomplete_step(state)
     if not nxt:
         print("All steps are complete.")
@@ -1371,6 +1574,8 @@ def intent_resume(args: argparse.Namespace) -> int:
         print(f"Message: {message}")
     if nxt == "approve_core_note":
         print("Hint: 先检查 core_note.draft.md；如还没建母稿，可先运行 --intent co_create_core_note；确认 core_note.md 后再运行 --intent approve_core_note")
+    elif nxt == "approve_video_scripts":
+        print("Hint: 先检查并修改 video/<platform>/voice_*.md；确认脚本后再运行 --intent approve_video_scripts")
     else:
         print(f"Hint: run --intent {nxt}")
     return 0
@@ -1458,6 +1663,7 @@ def main() -> int:
             "generate_prompts",
             "render_images",
             "derive_video_scripts",
+            "approve_video_scripts",
             "publish_wechat_drafts",
             "build_video_package",
             "resume",
@@ -1471,7 +1677,6 @@ def main() -> int:
     parser.add_argument("--mode", choices=["prod", "test"], default="prod")
     parser.add_argument("--timestamp", default="")
     parser.add_argument("--source", action="append", default=[])
-    parser.add_argument("--wechat-fetcher", default="")
     parser.add_argument("--youtube-runner", default="")
     parser.add_argument("--youtube-download-script", default="")
     parser.add_argument("--approved-prompt-titles", action="store_true")
@@ -1490,6 +1695,7 @@ def main() -> int:
     parser.add_argument("--ending-policy", choices=["adaptive", "always", "never"], default="adaptive")
     parser.add_argument("--logic-mode", choices=["hybrid", "rule", "llm"], default="hybrid")
     parser.add_argument("--unit-cost", type=float, default=0.6)
+    parser.add_argument("--image-provider", choices=["auto", "comfly", "openrouter"], default="auto")
     args = parser.parse_args()
 
     if args.intent == "init_topic":
@@ -1519,6 +1725,8 @@ def main() -> int:
         return intent_render_images(args)
     if args.intent == "derive_video_scripts":
         return intent_derive_video_scripts(args)
+    if args.intent == "approve_video_scripts":
+        return intent_approve_video_scripts(args)
     if args.intent == "publish_wechat_drafts":
         return intent_publish_wechat_drafts(args)
     if args.intent == "build_video_package":

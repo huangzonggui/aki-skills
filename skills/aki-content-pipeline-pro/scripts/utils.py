@@ -210,19 +210,27 @@ def copy_selected_images(paths: Iterable[Path], dst_dir: Path) -> list[Path]:
 
 def convert_image_to_jpg(src: Path, dst: Path, quality: str = "90") -> Path:
     dst.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        "sips",
-        "-s",
-        "format",
-        "jpeg",
-        "-s",
-        "formatOptions",
-        quality,
-        str(src),
-        "--out",
-        str(dst),
-    ]
-    run_checked(cmd)
+    try:
+        from PIL import Image
+
+        img = Image.open(src)
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        img.save(str(dst), "JPEG", quality=int(quality))
+    except ImportError:
+        cmd = [
+            "sips",
+            "-s",
+            "format",
+            "jpeg",
+            "-s",
+            "formatOptions",
+            quality,
+            str(src),
+            "--out",
+            str(dst),
+        ]
+        run_checked(cmd)
     return dst
 
 
@@ -276,14 +284,22 @@ def best_effort_fetch(url: str, timeout: int = 25) -> str:
     import html
     import urllib.request
 
+    import sys as _sys
+
+    _UA = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ) if _sys.platform.startswith("win") else (
+        "Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ) if _sys.platform.startswith("linux") else (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )
+
     req = urllib.request.Request(
         url=url,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36"
-            )
-        },
+        headers={"User-Agent": _UA},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = resp.read().decode("utf-8", errors="ignore")

@@ -28,6 +28,7 @@ PIPELINE = SCRIPT_DIR / "pipeline.py"
 STEP_MESSAGE_HINTS = {
     "approve_core_note": "通过母稿",
     "render_images": "通过提示词",
+    "approve_video_scripts": "通过视频脚本",
     "build_video_package": "状态",
     "publish_wechat_drafts": "发布公众号草稿",
 }
@@ -61,6 +62,8 @@ def parse_message(message: str) -> ParsedMessage:
         return ParsedMessage(action="approve_core_note")
     if text == "通过提示词":
         return ParsedMessage(action="approve_prompts")
+    if text == "通过视频脚本":
+        return ParsedMessage(action="approve_video_scripts")
     if text.startswith("返工"):
         mapping = {
             "返工母稿": "core_note",
@@ -123,16 +126,6 @@ class ChatPipelineOrchestrator:
             capture_output=True,
             check=False,
         )
-
-    @staticmethod
-    def _ensure_ok(
-        cp: subprocess.CompletedProcess[str],
-        allowed_codes: set[int] | None = None,
-        label: str = "pipeline command",
-    ) -> None:
-        ok_codes = allowed_codes or {0}
-        if cp.returncode not in ok_codes:
-            raise RuntimeError(cp.stderr.strip() or cp.stdout.strip() or f"{label} failed")
 
     def _topic_status(self, topic_root: Path) -> dict[str, Any]:
         state = load_state(topic_root)
@@ -201,37 +194,50 @@ class ChatPipelineOrchestrator:
         topic_root = self._read_stdout_path(init_cp)
         intake = append_chat_intake(topic_root, channel, user_id, payload or title)
         ingest_cp = self._run_pipeline(["--intent", "ingest_sources", "--topic-root", str(topic_root), "--source", str(intake)])
-        self._ensure_ok(ingest_cp, label="ingest_sources")
+        if ingest_cp.returncode != 0:
+            raise RuntimeError(ingest_cp.stderr.strip() or ingest_cp.stdout.strip() or "ingest_sources failed")
         summarize_cp = self._run_pipeline(["--intent", "summarize_core_note", "--topic-root", str(topic_root)])
-        self._ensure_ok(summarize_cp, label="summarize_core_note")
+        if summarize_cp.returncode != 0:
+            raise RuntimeError(summarize_cp.stderr.strip() or summarize_cp.stdout.strip() or "summarize_core_note failed")
         co_create_cp = self._run_pipeline(["--intent", "co_create_core_note", "--topic-root", str(topic_root)])
-        self._ensure_ok(co_create_cp, allowed_codes={0, 2}, label="co_create_core_note")
+        if co_create_cp.returncode != 0:
+            raise RuntimeError(co_create_cp.stderr.strip() or co_create_cp.stdout.strip() or "co_create_core_note failed")
         return topic_root
 
     def _run_ingest_refresh_flow(self, topic_root: Path, payload: str, channel: str, user_id: str) -> None:
         intake = append_chat_intake(topic_root, channel, user_id, payload)
         ingest_cp = self._run_pipeline(["--intent", "ingest_sources", "--topic-root", str(topic_root), "--source", str(intake)])
-        self._ensure_ok(ingest_cp, label="ingest_sources")
+        if ingest_cp.returncode != 0:
+            raise RuntimeError(ingest_cp.stderr.strip() or ingest_cp.stdout.strip() or "ingest_sources failed")
         invalidate_from_step(topic_root, "summarize_core_note", reason="new chat intake added")
         summarize_cp = self._run_pipeline(["--intent", "summarize_core_note", "--topic-root", str(topic_root)])
-        self._ensure_ok(summarize_cp, label="summarize_core_note")
+        if summarize_cp.returncode != 0:
+            raise RuntimeError(summarize_cp.stderr.strip() or summarize_cp.stdout.strip() or "summarize_core_note failed")
 
     def _run_core_note_approval_flow(self, topic_root: Path) -> None:
         for intent in ("approve_core_note", "derive_platform_copies", "generate_prompts"):
             cp = self._run_pipeline(["--intent", intent, "--topic-root", str(topic_root)])
-            self._ensure_ok(cp, label=intent)
+            if cp.returncode != 0:
+                raise RuntimeError(cp.stderr.strip() or cp.stdout.strip() or f"{intent} failed")
 
     def _run_post_prompt_flow(self, topic_root: Path) -> None:
         render_cp = self._run_pipeline(
             ["--intent", "render_images", "--topic-root", str(topic_root), "--approved-prompt-titles"]
         )
-        self._ensure_ok(render_cp, label="render_images")
-        for intent in ("derive_video_scripts", "build_video_package"):
+        if render_cp.returncode != 0:
+            raise RuntimeError(render_cp.stderr.strip() or render_cp.stdout.strip() or "render_images failed")
+        cp = self._run_pipeline(["--intent", "derive_video_scripts", "--topic-root", str(topic_root)])
+        if cp.returncode != 0:
+            raise RuntimeError(cp.stderr.strip() or cp.stdout.strip() or "derive_video_scripts failed")
+
+    def _run_post_video_script_flow(self, topic_root: Path) -> None:
+        for intent in ("approve_video_scripts", "build_video_package"):
             args = ["--intent", intent, "--topic-root", str(topic_root)]
             if intent == "build_video_package":
                 args.append("--force-export")
             cp = self._run_pipeline(args)
-            self._ensure_ok(cp, label=intent)
+            if cp.returncode != 0:
+                raise RuntimeError(cp.stderr.strip() or cp.stdout.strip() or f"{intent} failed")
 
     def handle_message(self, channel: str, user_id: str, thread_id: str, message: str) -> dict[str, Any]:
         parsed = parse_message(message)
@@ -261,6 +267,9 @@ class ChatPipelineOrchestrator:
             return self._topic_status(topic_root)
         if parsed.action == "approve_prompts":
             self._run_post_prompt_flow(topic_root)
+            return self._topic_status(topic_root)
+        if parsed.action == "approve_video_scripts":
+            self._run_post_video_script_flow(topic_root)
             return self._topic_status(topic_root)
         if parsed.action == "rework":
             if not parsed.target:

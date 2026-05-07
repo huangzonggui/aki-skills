@@ -16,7 +16,9 @@ DEFAULT_VISUAL_ENFORCEMENT = (
     "Render Safety Rules:\n"
     "- Background must stay pure white (#FFFFFF), not cream, gray, paper texture, or notebook texture.\n"
     "- Keep every title, paragraph, icon, arrow, callout, and highlight inside a safety margin of at least 48px from all four edges on a 2K-class canvas.\n"
-    "- If the layout gets crowded, reduce element size or split hierarchy, but do not let important content touch the edge."
+    "- If the layout gets crowded, reduce element size or split hierarchy, but do not let important content touch the edge.\n"
+    "- Do not render third-party media names, blogger names, bylines, self-media branding, account names, avatars, QR codes, watermarks, logos, domains, raw URLs, or source attributions unless they are themselves the primary subject.\n"
+    "- Treat source tails such as 'XX解读', '敬请留意', '欢迎关注', and author/editor/source credits as noise and exclude them from the image."
 )
 
 

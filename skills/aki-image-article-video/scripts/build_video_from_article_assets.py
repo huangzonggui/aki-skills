@@ -70,6 +70,25 @@ MINIMAX_NAME_ALIAS = {
     "日常松弛男": "Chinese (Mandarin)_Gentleman",
 }
 
+
+def _resolve_binary(name: str) -> str:
+    candidate = shutil.which(name)
+    if candidate:
+        return candidate
+    common = {
+        "ffmpeg": ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"],
+        "ffprobe": ["/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe"],
+    }
+    for raw in common.get(name, []):
+        path = Path(raw)
+        if path.exists():
+            return str(path)
+    return name
+
+
+FFMPEG_BIN = _resolve_binary("ffmpeg")
+FFPROBE_BIN = _resolve_binary("ffprobe")
+
 NON_SPOKEN_TITLE_RE = re.compile(
     r"^(?:视频)?口播(?:脚本|稿)(?:最终版|定稿|完整版|初稿)?$",
     re.IGNORECASE,
@@ -923,7 +942,7 @@ def apply_atempo_speed(input_m4a: Path, output_m4a: Path, speed_ratio: float) ->
     chain = ",".join(f"atempo={x:.6f}" for x in factors)
     run(
         [
-            "ffmpeg",
+            FFMPEG_BIN,
             "-y",
             "-i",
             str(input_m4a),
@@ -1024,7 +1043,7 @@ def synthesize_audio_edge(
 
         run(
             [
-                "ffmpeg",
+                FFMPEG_BIN,
                 "-y",
                 "-i",
                 str(mp3),
@@ -1138,7 +1157,7 @@ def synthesize_audio_minimax(
 
         run(
             [
-                "ffmpeg",
+                FFMPEG_BIN,
                 "-y",
                 "-i",
                 str(mp3),
@@ -1207,7 +1226,7 @@ def synthesize_audio_siliconflow(
         mp3.write_bytes(raw)
         run(
             [
-                "ffmpeg",
+                FFMPEG_BIN,
                 "-y",
                 "-i",
                 str(mp3),
@@ -1227,7 +1246,7 @@ def synthesize_audio_siliconflow(
 def probe_duration_us(audio_path: Path) -> int:
     out = subprocess.check_output(
         [
-            "ffprobe",
+            FFPROBE_BIN,
             "-v",
             "error",
             "-show_entries",
