@@ -15,9 +15,11 @@
       "source": "./",
       "strict": false,
       "skills": [
+        "./skills/Youtube-clipper-skill",
         "./skills/_tmp_wechat_pub_test",
         "./skills/aki-30s-video-script-style",
         "./skills/aki-adaptive-video-script-style",
+        "./skills/aki-aiu",
         "./skills/aki-article-transformer",
         "./skills/aki-content-pipeline-pro",
         "./skills/aki-context-to-html",
@@ -26,6 +28,7 @@
         "./skills/aki-domestic-platform-risk-check",
         "./skills/aki-gemini-playwright-mcp",
         "./skills/aki-gemini-web-curl",
+        "./skills/aki-handdrawn-cover",
         "./skills/aki-handnote-cover",
         "./skills/aki-image-article-video",
         "./skills/aki-obsidian-brain",
@@ -79,8 +82,7 @@
         "./skills/notion-research-documentation",
         "./skills/obsidian-cli",
         "./skills/screenshot",
-        "./skills/skill-creator",
-        "./skills/Youtube-clipper-skill"
+        "./skills/skill-creator"
       ]
     }
   ]
