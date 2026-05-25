@@ -1,0 +1,149 @@
+import argparse
+import importlib.util
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "aiu.py"
+SPEC = importlib.util.spec_from_file_location("aiu", SCRIPT)
+aiu = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
+SPEC.loader.exec_module(aiu)
+
+
+class AiuConfigTests(unittest.TestCase):
+    def test_cygces_profile_reads_skill_local_env_and_hermes_key_alias(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script_dir = Path(tmp) / "scripts"
+            script_dir.mkdir()
+            env_file = Path(tmp) / ".env"
+            env_file.write_text(
+                "\n".join(
+                    [
+                        "CYGCES_BASE=https://codex-manager.cygces.com",
+                        "CYGCES_USERNAME=aki@example.com",
+                        "CYGCES_PASSWORD=fill-me",
+                        "CYGCES_HERMES_API_KEY=sk-test",
+                        "CYGCES_INTERVAL=45",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(profile="cygces", interval=None)
+            with patch.dict(os.environ, {}, clear=True), patch.object(aiu, "__file__", str(script_dir / "aiu.py")):
+                config = aiu.resolve_config(args)
+
+        self.assertEqual(config.profile, "cygces")
+        self.assertEqual(config.base, "https://codex-manager.cygces.com")
+        self.assertEqual(config.username, "aki@example.com")
+        self.assertEqual(config.password, "fill-me")
+        self.assertEqual(config.api_key, "sk-test")
+        self.assertEqual(config.interval, 45)
+        self.assertEqual(config.api_style, "sub2api")
+
+    def test_home_keys_env_does_not_override_skill_local_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            script_dir = Path(tmp) / "skill" / "scripts"
+            local_env = script_dir.parent / ".env"
+            home_keys = home / ".config" / "ai" / "keys.env"
+            script_dir.mkdir(parents=True)
+            home_keys.parent.mkdir(parents=True)
+            local_env.write_text(
+                "\n".join(
+                    [
+                        "DSHUB_BASE=https://local.example.com",
+                        "DSHUB_USERNAME=local-user",
+                        "DSHUB_PASSWORD=local-pass",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            home_keys.write_text(
+                "\n".join(
+                    [
+                        "DSHUB_BASE=https://home.example.com",
+                        "DSHUB_USERNAME=home-user",
+                        "DSHUB_PASSWORD=home-pass",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(profile="dshub", interval=None)
+            with patch.dict(os.environ, {"HOME": str(home)}, clear=True), patch.object(aiu, "__file__", str(script_dir / "aiu.py")):
+                config = aiu.resolve_config(args)
+
+        self.assertEqual(config.base, "https://local.example.com")
+        self.assertEqual(config.username, "local-user")
+        self.assertEqual(config.password, "local-pass")
+
+
+class AiuSummaryTests(unittest.TestCase):
+    def test_summary_includes_new_api_token_usage(self):
+        summary = aiu.build_summary(
+            {
+                "username": "aki",
+                "display_name": "Aki",
+                "group": "default",
+                "quota": 500_000,
+                "used_quota": 250_000,
+                "request_count": 3,
+            },
+            {"subscriptions": []},
+            token_usage={
+                "name": "Hermes",
+                "total_granted": 2_500_000,
+                "total_used": 1_000_000,
+                "total_available": 1_500_000,
+                "unlimited_quota": False,
+                "model_limits_enabled": True,
+                "model_limits": {"gpt-5.5": True},
+                "expires_at": 0,
+            },
+            source={"profile": "cygces", "base": "https://codex-manager.cygces.com"},
+        )
+
+        token = summary["token_usage"]
+        self.assertEqual(token["name"], "Hermes")
+        self.assertEqual(token["total_granted_usd"], 5.0)
+        self.assertEqual(token["total_used_usd"], 2.0)
+        self.assertEqual(token["total_available_usd"], 3.0)
+        self.assertEqual(token["expires_at_text"], "永不过期")
+        self.assertEqual(token["models"], ["gpt-5.5"])
+        self.assertEqual(summary["source"]["profile"], "cygces")
+
+    def test_sub2api_summary_includes_key_quota_and_usage(self):
+        summary = aiu.build_sub2api_summary(
+            user={"email": "aki@example.com", "display_name": "Aki"},
+            keys_data={
+                "items": [
+                    {
+                        "id": 16,
+                        "name": "Hermes",
+                        "status": "active",
+                        "quota": 100.0,
+                        "quota_used": 31.25,
+                        "expires_at": None,
+                        "group": {"name": "codex", "platform": "openai"},
+                    }
+                ],
+                "total": 1,
+            },
+            usage_data={"stats": {"16": {"today_actual_cost": 2.5, "total_actual_cost": 31.25}}},
+            source={"profile": "cygces", "base": "https://codex-manager.cygces.com"},
+        )
+
+        key = summary["api_keys"][0]
+        self.assertEqual(key["name"], "Hermes")
+        self.assertEqual(key["quota_usd"], 100.0)
+        self.assertEqual(key["used_usd"], 31.25)
+        self.assertEqual(key["remaining_usd"], 68.75)
+        self.assertEqual(key["today_used_usd"], 2.5)
+        self.assertEqual(key["expires_at_text"], "永不过期")
+
+
+if __name__ == "__main__":
+    unittest.main()

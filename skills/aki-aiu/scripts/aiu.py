@@ -34,6 +34,35 @@ from urllib.error import HTTPError, URLError
 
 # new-api 的额度单位：500000 quota = 1 USD
 QUOTA_PER_USD = 500_000
+PROFILE_ALIASES = {"cyg": "cygces"}
+DEFAULT_BASES = {
+    "dshub": "https://api.dshub.top",
+    "cygces": "https://codex-manager.cygces.com",
+}
+DEFAULT_API_STYLES = {
+    "dshub": "new-api",
+    "cygces": "sub2api",
+}
+
+
+class AiuConfig:
+    def __init__(
+        self,
+        profile: str,
+        base: str,
+        username: str,
+        password: str,
+        api_key: str,
+        interval: int,
+        api_style: str = "new-api",
+    ):
+        self.profile = profile
+        self.base = base
+        self.username = username
+        self.password = password
+        self.api_key = api_key
+        self.interval = interval
+        self.api_style = api_style
 
 
 # ---------- .env loader ----------
@@ -53,10 +82,11 @@ def load_env(env_path: Path) -> None:
 
 # ---------- HTTP client ----------
 class DshubClient:
-    def __init__(self, base: str, username: str, password: str):
+    def __init__(self, base: str, username: str = "", password: str = "", api_key: str = ""):
         self.base = base.rstrip("/")
         self.username = username
         self.password = password
+        self.api_key = api_key
         self.user_id: int | None = None
         self.cookie_jar = CookieJar()
         self.opener = urlrequest.build_opener(
@@ -67,13 +97,21 @@ class DshubClient:
             ("Accept", "application/json, text/plain, */*"),
         ]
 
-    def _request(self, method: str, path: str, body: dict | None = None) -> dict:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        body: dict | None = None,
+        bearer: str | None = None,
+    ) -> dict:
         url = f"{self.base}{path}"
         data = None
         headers = {}
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
         if self.user_id is not None:
             headers["New-Api-User"] = str(self.user_id)
         req = urlrequest.Request(url, data=data, method=method, headers=headers)
@@ -106,6 +144,79 @@ class DshubClient:
             raise RuntimeError(f"获取套餐信息失败：{data.get('message')}")
         return data["data"]
 
+    def fetch_token_usage(self) -> dict:
+        if not self.api_key:
+            return {}
+        data = self._request("GET", "/api/usage/token", bearer=self.api_key)
+        if not (data.get("success") or data.get("code") is True):
+            raise RuntimeError(f"获取 API Key 额度失败：{data.get('message')}")
+        return data["data"]
+
+
+class Sub2apiClient:
+    def __init__(self, base: str, username: str, password: str):
+        self.base = base.rstrip("/")
+        self.api_base = f"{self.base}/api/v1"
+        self.username = username
+        self.password = password
+        self.access_token = ""
+        self.refresh_token = ""
+        self.opener = urlrequest.build_opener()
+        self.opener.addheaders = [
+            ("User-Agent", "Mozilla/5.0 (aiu-monitor)"),
+            ("Accept", "application/json, text/plain, */*"),
+        ]
+
+    def _unwrap(self, payload: dict) -> Any:
+        if "code" in payload:
+            if payload.get("code") == 0:
+                return payload.get("data")
+            raise RuntimeError(f"请求失败：{payload.get('message') or payload.get('detail')}")
+        if payload.get("success") is False:
+            raise RuntimeError(f"请求失败：{payload.get('message') or payload.get('detail')}")
+        return payload.get("data", payload)
+
+    def _request(self, method: str, path: str, body: dict | None = None) -> Any:
+        url = f"{self.api_base}{path}"
+        data = None
+        headers = {"Content-Type": "application/json"}
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+        if self.access_token:
+            headers["Authorization"] = f"Bearer {self.access_token}"
+        req = urlrequest.Request(url, data=data, method=method, headers=headers)
+        with self.opener.open(req, timeout=20) as resp:
+            payload = resp.read().decode("utf-8", errors="replace")
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"非 JSON 响应：{payload[:200]}") from e
+        return self._unwrap(parsed)
+
+    def login(self) -> None:
+        data = self._request(
+            "POST",
+            "/auth/login",
+            {"email": self.username, "password": self.password},
+        )
+        if data.get("requires_2fa"):
+            raise RuntimeError("登录需要 2FA，AIu 暂未支持自动输入 2FA")
+        self.access_token = str(data.get("access_token") or "")
+        self.refresh_token = str(data.get("refresh_token") or "")
+        if not self.access_token:
+            raise RuntimeError("登录失败：未返回 access_token")
+
+    def fetch_me(self) -> dict:
+        return self._request("GET", "/auth/me")
+
+    def fetch_keys(self) -> dict:
+        return self._request("GET", "/keys?page=1&page_size=100")
+
+    def fetch_key_usage(self, ids: list[int]) -> dict:
+        if not ids:
+            return {}
+        return self._request("POST", "/usage/dashboard/api-keys-usage", {"api_key_ids": ids})
+
 
 # ---------- formatting helpers ----------
 def usd(quota: int | float) -> float:
@@ -120,6 +231,19 @@ def fmt_ts(ts: int | None) -> str:
     if not ts:
         return "—"
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def fmt_ts_from_any(value: Any) -> str:
+    if not value:
+        return "永不过期"
+    if isinstance(value, (int, float)):
+        return fmt_ts(int(value))
+    text = str(value)
+    try:
+        normalized = text.replace("Z", "+00:00")
+        return datetime.fromisoformat(normalized).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return text
 
 
 def fmt_duration(seconds: int) -> str:
@@ -138,7 +262,127 @@ def fmt_duration(seconds: int) -> str:
 
 
 # ---------- summary builder ----------
-def build_summary(self_info: dict, sub_info: dict) -> dict:
+def build_token_usage_summary(token_usage: dict) -> dict:
+    total_granted = int(token_usage.get("total_granted", 0) or 0)
+    total_used = int(token_usage.get("total_used", 0) or 0)
+    total_available = int(token_usage.get("total_available", 0) or 0)
+    model_limits = token_usage.get("model_limits") or {}
+    if isinstance(model_limits, dict):
+        models = sorted(k for k, enabled in model_limits.items() if enabled)
+    else:
+        models = []
+    expires_at = int(token_usage.get("expires_at", 0) or 0)
+    return {
+        "name": token_usage.get("name", ""),
+        "total_granted_quota": total_granted,
+        "total_used_quota": total_used,
+        "total_available_quota": total_available,
+        "total_granted_usd": usd(total_granted),
+        "total_used_usd": usd(total_used),
+        "total_available_usd": usd(total_available),
+        "unlimited_quota": bool(token_usage.get("unlimited_quota")),
+        "model_limits_enabled": bool(token_usage.get("model_limits_enabled")),
+        "models": models,
+        "expires_at": expires_at,
+        "expires_at_text": "永不过期" if expires_at == 0 else fmt_ts(expires_at),
+    }
+
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _pick_usage_stats(usage_data: dict, key_id: int) -> dict:
+    candidates = [
+        usage_data.get("stats") if isinstance(usage_data, dict) else None,
+        usage_data.get("data") if isinstance(usage_data, dict) else None,
+        usage_data,
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, dict):
+            value = candidate.get(str(key_id), candidate.get(key_id))
+            if isinstance(value, dict):
+                return value
+    return {}
+
+
+def build_sub2api_summary(
+    user: dict,
+    keys_data: dict,
+    usage_data: dict | None = None,
+    source: dict | None = None,
+) -> dict:
+    now = int(time.time())
+    items = keys_data.get("items") if isinstance(keys_data, dict) else None
+    if items is None and isinstance(keys_data, list):
+        items = keys_data
+    items = items or []
+    usage_data = usage_data or {}
+    api_keys = []
+    for item in items:
+        key_id = int(item.get("id", 0) or 0)
+        quota = _as_float(item.get("quota"))
+        used = _as_float(item.get("quota_used"))
+        usage = _pick_usage_stats(usage_data, key_id)
+        today_used = _as_float(usage.get("today_actual_cost"))
+        total_used = _as_float(usage.get("total_actual_cost"), used)
+        if total_used > used:
+            used = total_used
+        remaining = max(quota - used, 0.0) if quota > 0 else 0.0
+        expires_at = item.get("expires_at")
+        group = item.get("group") or {}
+        api_keys.append(
+            {
+                "id": key_id,
+                "name": item.get("name", ""),
+                "status": item.get("status", ""),
+                "group": group.get("name", ""),
+                "platform": group.get("platform", ""),
+                "quota_usd": round(quota, 4),
+                "used_usd": round(used, 4),
+                "remaining_usd": round(remaining, 4),
+                "today_used_usd": round(today_used, 4),
+                "rate_limit_5h_usd": _as_float(item.get("rate_limit_5h")),
+                "rate_limit_1d_usd": _as_float(item.get("rate_limit_1d")),
+                "rate_limit_7d_usd": _as_float(item.get("rate_limit_7d")),
+                "expires_at": expires_at,
+                "expires_at_text": fmt_ts_from_any(expires_at),
+            }
+        )
+    total_quota = round(sum(k["quota_usd"] for k in api_keys), 4)
+    total_used = round(sum(k["used_usd"] for k in api_keys), 4)
+    return {
+        "fetched_at": now,
+        "fetched_at_text": fmt_ts(now),
+        "source": source or {},
+        "user": {
+            "username": user.get("email") or user.get("username"),
+            "display_name": user.get("display_name") or user.get("name") or user.get("email"),
+            "group": user.get("group") or "",
+            "request_count": user.get("request_count") or "",
+        },
+        "general": {
+            "quota": 0,
+            "usd": round(total_quota - total_used, 4),
+            "used_quota_lifetime": 0,
+            "used_usd_lifetime": total_used,
+        },
+        "api_keys": api_keys,
+        "subscriptions": [],
+    }
+
+
+def build_summary(
+    self_info: dict,
+    sub_info: dict,
+    token_usage: dict | None = None,
+    source: dict | None = None,
+) -> dict:
     now = int(time.time())
     general_quota = int(self_info.get("quota", 0))
     used_quota_lifetime = int(self_info.get("used_quota", 0))
@@ -196,9 +440,10 @@ def build_summary(self_info: dict, sub_info: dict) -> dict:
             "next_reset_in_seconds": max(next_reset - now, 0),
         })
 
-    return {
+    summary = {
         "fetched_at": now,
         "fetched_at_text": fmt_ts(now),
+        "source": source or {},
         "user": {
             "username": self_info.get("username"),
             "display_name": self_info.get("display_name"),
@@ -213,6 +458,9 @@ def build_summary(self_info: dict, sub_info: dict) -> dict:
         },
         "subscriptions": sub_blocks,
     }
+    if token_usage:
+        summary["token_usage"] = build_token_usage_summary(token_usage)
+    return summary
 
 
 # ---------- rendering ----------
@@ -247,10 +495,11 @@ def render_text(summary: dict, color: bool = True) -> str:
         return ANSI[key] if color else ""
 
     lines: list[str] = []
+    source = summary.get("source") or {}
     user = summary["user"]
     g = summary["general"]
     lines.append(
-        f"{c('bold')}🌊 Token Wave 监控  ·  {summary['fetched_at_text']}{c('reset')}"
+        f"{c('bold')}AIu 中转站监控 [{source.get('profile', 'default')}]  ·  {summary['fetched_at_text']}{c('reset')}"
     )
     lines.append(
         f"  用户：{c('cyan')}{user['display_name']}{c('reset')}（{user['username']}）"
@@ -260,6 +509,36 @@ def render_text(summary: dict, color: bool = True) -> str:
         f"  通用额度：{c('bold')}${g['usd']:.2f}{c('reset')}"
         f"   历史消耗：${g['used_usd_lifetime']:.2f}"
     )
+
+    token = summary.get("token_usage")
+    if token:
+        limit_note = "无限额" if token["unlimited_quota"] else f"剩余 ${token['total_available_usd']:.2f}"
+        lines.append(
+            f"  API Key：{token['name'] or '未命名'}"
+            f"   总 ${token['total_granted_usd']:.2f}"
+            f"   已用 ${token['total_used_usd']:.2f}"
+            f"   {limit_note}"
+            f"   到期：{token['expires_at_text']}"
+        )
+        if token["model_limits_enabled"] and token["models"]:
+            lines.append(f"  模型限制：{', '.join(token['models'])}")
+
+    api_keys = summary.get("api_keys") or []
+    if api_keys:
+        lines.append("")
+        lines.append(f"{c('magenta')}■ API Keys{c('reset')}")
+        for key in api_keys:
+            quota = key["quota_usd"]
+            used = key["used_usd"]
+            remaining = key["remaining_usd"]
+            if quota > 0:
+                quota_text = f"总 ${quota:.2f} 已用 ${used:.2f} 剩余 ${remaining:.2f}"
+            else:
+                quota_text = "不限总额"
+            lines.append(
+                f"  #{key['id']} {key['name']} [{key['status']}]"
+                f"  今日 ${key['today_used_usd']:.4f}  {quota_text}  到期：{key['expires_at_text']}"
+            )
 
     if not summary["subscriptions"]:
         lines.append(f"  {c('dim')}（无生效套餐）{c('reset')}")
@@ -304,24 +583,104 @@ def render_text(summary: dict, color: bool = True) -> str:
 
 
 # ---------- main loop ----------
-def run_once(client: DshubClient) -> dict:
-    if client.user_id is None:
-        client.login()
-    try:
-        self_info = client.fetch_self()
-        sub_info = client.fetch_subscription()
-    except HTTPError as e:
-        if e.code in (401, 403):
+def normalize_profile(profile: str) -> str:
+    profile = (profile or "dshub").strip().lower()
+    return PROFILE_ALIASES.get(profile, profile)
+
+
+def env_prefix(profile: str) -> str:
+    return normalize_profile(profile).upper().replace("-", "_")
+
+
+def first_env(names: list[str]) -> str:
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return ""
+
+
+def load_env_files() -> None:
+    here = Path(__file__).resolve().parent
+    candidates = []
+    if os.environ.get("AIU_ENV_FILE"):
+        candidates.append(Path(os.environ["AIU_ENV_FILE"]))
+    candidates += [
+        here.parent / ".env",  # preferred: skill root, portable with this skill directory
+        here / ".env",         # optional script-local override
+    ]
+    for candidate in candidates:
+        load_env(candidate)
+
+
+def resolve_config(args: argparse.Namespace) -> AiuConfig:
+    load_env_files()
+    profile = normalize_profile(args.profile or os.environ.get("AIU_PROFILE", "dshub"))
+    prefix = env_prefix(profile)
+    base = first_env([f"{prefix}_BASE", "AIU_BASE"]) or DEFAULT_BASES.get(profile, "")
+    username = first_env([f"{prefix}_USERNAME", "AIU_USERNAME"])
+    password = first_env([f"{prefix}_PASSWORD", "AIU_PASSWORD"])
+    api_key = first_env([f"{prefix}_API_KEY", f"{prefix}_HERMES_API_KEY", "AIU_API_KEY"])
+    interval_raw = first_env([f"{prefix}_INTERVAL", "AIU_INTERVAL", "DSHUB_INTERVAL"])
+    interval = args.interval if args.interval is not None else int(interval_raw or 30)
+    api_style = first_env([f"{prefix}_API_STYLE", "AIU_API_STYLE"]) or DEFAULT_API_STYLES.get(profile, "new-api")
+    return AiuConfig(profile, base, username, password, api_key, interval, api_style)
+
+
+def run_once(client: DshubClient, profile: str = "dshub") -> dict:
+    if client.username and client.password:
+        if client.user_id is None:
             client.login()
+        try:
             self_info = client.fetch_self()
             sub_info = client.fetch_subscription()
-        else:
-            raise
-    return build_summary(self_info, sub_info)
+        except HTTPError as e:
+            if e.code in (401, 403):
+                client.login()
+                self_info = client.fetch_self()
+                sub_info = client.fetch_subscription()
+            else:
+                raise
+    else:
+        self_info = {
+            "username": client.username or profile,
+            "display_name": client.username or profile,
+            "group": "",
+            "request_count": "",
+            "quota": 0,
+            "used_quota": 0,
+        }
+        sub_info = {}
+    token_usage = client.fetch_token_usage() if client.api_key else None
+    return build_summary(
+        self_info,
+        sub_info,
+        token_usage=token_usage,
+        source={"profile": profile, "base": client.base},
+    )
+
+
+def run_once_sub2api(client: Sub2apiClient, profile: str = "cygces") -> dict:
+    if not client.access_token:
+        client.login()
+    user = client.fetch_me()
+    keys_data = client.fetch_keys()
+    ids = []
+    for item in keys_data.get("items", []) if isinstance(keys_data, dict) else []:
+        if item.get("id") is not None:
+            ids.append(int(item["id"]))
+    usage_data = client.fetch_key_usage(ids) if ids else {}
+    return build_sub2api_summary(
+        user,
+        keys_data,
+        usage_data=usage_data,
+        source={"profile": profile, "base": client.base},
+    )
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="dshub.top 余额/套餐定时监控")
+    parser = argparse.ArgumentParser(description="AI 中转站余额/套餐/API Key 额度监控")
+    parser.add_argument("--profile", default=None, help="配置 profile，例如 dshub / cygces")
     parser.add_argument("--once", action="store_true", help="只执行一次后退出")
     parser.add_argument("--json", action="store_true", help="输出 JSON 而非可读文本")
     parser.add_argument("--interval", type=int, default=None, help="刷新间隔（秒）")
@@ -329,28 +688,33 @@ def main() -> int:
     parser.add_argument("--no-clear", action="store_true", help="不清屏，每次追加输出")
     args = parser.parse_args()
 
-    here = Path(__file__).resolve().parent
-    # .env 加载优先级：$AIU_ENV_FILE > $SKILL_DIR/../.env > $SKILL_DIR/.env > ~/.config/aiu/.env
-    candidates = []
-    if os.environ.get("AIU_ENV_FILE"):
-        candidates.append(Path(os.environ["AIU_ENV_FILE"]))
-    candidates += [here.parent / ".env", here / ".env", Path.home() / ".config" / "aiu" / ".env"]
-    for c in candidates:
-        if c.exists():
-            load_env(c)
-            break
-
-    base = os.environ.get("DSHUB_BASE", "https://api.dshub.top")
-    username = os.environ.get("DSHUB_USERNAME", "")
-    password = os.environ.get("DSHUB_PASSWORD", "")
-    interval = args.interval if args.interval is not None else int(
-        os.environ.get("DSHUB_INTERVAL", "30") or 30
-    )
-    if not username or not password:
-        print("错误：请在 .env 中设置 DSHUB_USERNAME / DSHUB_PASSWORD", file=sys.stderr)
+    config = resolve_config(args)
+    if not config.base:
+        print(f"错误：请设置 {env_prefix(config.profile)}_BASE", file=sys.stderr)
+        return 2
+    if config.api_style == "sub2api" and not (config.username and config.password):
+        prefix = env_prefix(config.profile)
+        missing = []
+        if not config.username:
+            missing.append(f"{prefix}_USERNAME")
+        if not config.password:
+            missing.append(f"{prefix}_PASSWORD")
+        print(f"错误：请设置 {' / '.join(missing)}", file=sys.stderr)
+        return 2
+    if config.api_style != "sub2api" and not ((config.username and config.password) or config.api_key):
+        prefix = env_prefix(config.profile)
+        print(
+            f"错误：请设置 {prefix}_USERNAME / {prefix}_PASSWORD，或设置 {prefix}_API_KEY",
+            file=sys.stderr,
+        )
         return 2
 
-    client = DshubClient(base, username, password)
+    if config.api_style == "sub2api":
+        client = Sub2apiClient(config.base, config.username, config.password)
+        runner = lambda: run_once_sub2api(client, config.profile)
+    else:
+        client = DshubClient(config.base, config.username, config.password, config.api_key)
+        runner = lambda: run_once(client, config.profile)
 
     def emit(summary: dict) -> None:
         if args.json:
@@ -362,19 +726,19 @@ def main() -> int:
             sys.stdout.flush()
 
     if args.once:
-        emit(run_once(client))
+        emit(runner())
         return 0
 
-    print(f"开始监控 {base} ，每 {interval}s 刷新一次（Ctrl+C 退出）", file=sys.stderr)
+    print(f"开始监控 {config.base} ，每 {config.interval}s 刷新一次（Ctrl+C 退出）", file=sys.stderr)
     try:
         while True:
             try:
-                emit(run_once(client))
+                emit(runner())
             except (HTTPError, URLError, RuntimeError) as e:
                 ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 print(f"[{ts}] 刷新失败：{e}", file=sys.stderr)
                 client.user_id = None  # 强制下次重新登录
-            time.sleep(interval)
+            time.sleep(config.interval)
     except KeyboardInterrupt:
         print("\n已停止。", file=sys.stderr)
     return 0

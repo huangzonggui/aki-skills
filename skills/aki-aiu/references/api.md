@@ -19,7 +19,34 @@
   - `subscriptions[].subscription.next_reset_time`：下次额度重置 unix 秒
   - `subscriptions[].plan.total_amount`：每周期发放上限
   - `subscriptions[].plan.title / subtitle`：套餐名
+- `GET /api/usage/token` —— 当前 Bearer API Key 的额度信息
+  - Header：`Authorization: Bearer <API_KEY>`
+  - `total_granted`：API Key 总额度
+  - `total_used`：API Key 已用额度
+  - `total_available`：API Key 剩余额度
+  - `unlimited_quota`：是否不限额度
+  - `model_limits / model_limits_enabled`：模型限制
+  - `expires_at`：API Key 到期 unix 秒，`0` 表示永不过期
 
 ## 单位换算
 - `500000 quota = $1`（new-api 默认计费精度）
 - aiu.py 用 `QUOTA_PER_USD = 500000` 统一换算，所有 `*_usd` 字段直接是美元
+
+## Sub2API / cygces 后台
+
+`https://codex-manager.cygces.com/keys` 不是标准 new-api 前端，当前使用 `/api/v1` 后台接口。
+
+- `POST /api/v1/auth/login`
+  - body: `{"email":"...","password":"..."}`
+  - 返回 `access_token`
+- `GET /api/v1/auth/me`
+  - 当前用户信息
+- `GET /api/v1/keys?page=1&page_size=100`
+  - `items[].quota`：API Key 总额度（USD）
+  - `items[].quota_used`：API Key 已用额度（USD）
+  - `items[].status`：`active` / `inactive` / `quota_exhausted` / `expired`
+  - `items[].expires_at`：到期时间，空值表示永不过期
+  - `items[].rate_limit_5h / rate_limit_1d / rate_limit_7d`：周期限额（USD）
+- `POST /api/v1/usage/dashboard/api-keys-usage`
+  - body: `{"api_key_ids":[...]}`
+  - 返回每个 key 的 `today_actual_cost` 和 `total_actual_cost`
