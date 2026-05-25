@@ -15,11 +15,9 @@ SPEC.loader.exec_module(aiu)
 
 
 class AiuConfigTests(unittest.TestCase):
-    def test_cygces_profile_reads_skill_local_env_and_hermes_key_alias(self):
+    def test_cygces_profile_reads_global_keys_env_and_hermes_key_alias(self):
         with tempfile.TemporaryDirectory() as tmp:
-            script_dir = Path(tmp) / "scripts"
-            script_dir.mkdir()
-            env_file = Path(tmp) / ".env"
+            env_file = Path(tmp) / "keys.env"
             env_file.write_text(
                 "\n".join(
                     [
@@ -33,7 +31,7 @@ class AiuConfigTests(unittest.TestCase):
                 encoding="utf-8",
             )
             args = argparse.Namespace(profile="cygces", interval=None)
-            with patch.dict(os.environ, {}, clear=True), patch.object(aiu, "__file__", str(script_dir / "aiu.py")):
+            with patch.dict(os.environ, {}, clear=True), patch.object(aiu, "AI_KEYS_ENV", env_file):
                 config = aiu.resolve_config(args)
 
         self.assertEqual(config.profile, "cygces")
@@ -44,14 +42,12 @@ class AiuConfigTests(unittest.TestCase):
         self.assertEqual(config.interval, 45)
         self.assertEqual(config.api_style, "sub2api")
 
-    def test_home_keys_env_does_not_override_skill_local_env(self):
+    def test_skill_local_env_is_ignored(self):
         with tempfile.TemporaryDirectory() as tmp:
-            home = Path(tmp) / "home"
             script_dir = Path(tmp) / "skill" / "scripts"
             local_env = script_dir.parent / ".env"
-            home_keys = home / ".config" / "ai" / "keys.env"
+            global_keys = Path(tmp) / "keys.env"
             script_dir.mkdir(parents=True)
-            home_keys.parent.mkdir(parents=True)
             local_env.write_text(
                 "\n".join(
                     [
@@ -62,23 +58,23 @@ class AiuConfigTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            home_keys.write_text(
+            global_keys.write_text(
                 "\n".join(
                     [
-                        "DSHUB_BASE=https://home.example.com",
-                        "DSHUB_USERNAME=home-user",
-                        "DSHUB_PASSWORD=home-pass",
+                        "DSHUB_BASE=https://global.example.com",
+                        "DSHUB_USERNAME=global-user",
+                        "DSHUB_PASSWORD=global-pass",
                     ]
                 ),
                 encoding="utf-8",
             )
             args = argparse.Namespace(profile="dshub", interval=None)
-            with patch.dict(os.environ, {"HOME": str(home)}, clear=True), patch.object(aiu, "__file__", str(script_dir / "aiu.py")):
+            with patch.dict(os.environ, {}, clear=True), patch.object(aiu, "__file__", str(script_dir / "aiu.py")), patch.object(aiu, "AI_KEYS_ENV", global_keys):
                 config = aiu.resolve_config(args)
 
-        self.assertEqual(config.base, "https://local.example.com")
-        self.assertEqual(config.username, "local-user")
-        self.assertEqual(config.password, "local-pass")
+        self.assertEqual(config.base, "https://global.example.com")
+        self.assertEqual(config.username, "global-user")
+        self.assertEqual(config.password, "global-pass")
 
 
 class AiuSummaryTests(unittest.TestCase):

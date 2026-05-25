@@ -16,9 +16,12 @@ description: Check AI relay station (new-api compatible, e.g. dshub.top / Token 
 ## Quick start
 
 ```bash
-# 1. 配置凭据（首次，写入本 skill 目录的 .env；不要依赖 ~/.config/ai/keys.env）
-cd ${SKILL_DIR}
-cat > .env <<'EOF'
+# 1. 配置凭据（首次，把示例复制到全局 keys.env 后填真实值）
+mkdir -p /Users/aki/.config/ai
+cp ${SKILL_DIR}/.env.example /Users/aki/.config/ai/keys.env
+chmod 600 /Users/aki/.config/ai/keys.env
+
+# /Users/aki/.config/ai/keys.env 示例字段：
 DSHUB_BASE=https://api.dshub.top
 DSHUB_USERNAME=<你的账号>
 DSHUB_PASSWORD=<你的密码>
@@ -28,8 +31,6 @@ CYGCES_BASE=https://codex-manager.cygces.com
 CYGCES_USERNAME=<你的账号>
 CYGCES_PASSWORD=<你的密码>
 CYGCES_HERMES_API_KEY=<你的 API key>
-EOF
-chmod 600 .env
 
 # 2. 单次查询（人类可读）
 python3 ${SKILL_DIR}/scripts/aiu.py --once
@@ -45,7 +46,7 @@ python3 ${SKILL_DIR}/scripts/aiu.py --interval 60     # 1 分钟
 python3 ${SKILL_DIR}/scripts/aiu.py --interval 300    # 5 分钟
 ```
 
-`.env` 加载顺序：`$AIU_ENV_FILE` → `$SKILL_DIR/.env` → `$SKILL_DIR/scripts/.env`，后面的文件只补充前面没有的变量。默认不再读取 `~/.config/ai/keys.env` 或 `~/.config/aiu/.env`，这样复制/迁移整个 skill 目录即可带走配置。
+凭据默认从 `/Users/aki/.config/ai/keys.env` 读取；如需临时指定其它文件，可设置 `$AIU_ENV_FILE`。`.env.example` 只放占位字段，不放真实密钥。
 
 ## Options
 

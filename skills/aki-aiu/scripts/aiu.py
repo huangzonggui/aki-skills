@@ -43,6 +43,7 @@ DEFAULT_API_STYLES = {
     "dshub": "new-api",
     "cygces": "sub2api",
 }
+AI_KEYS_ENV = Path("/Users/aki/.config/ai/keys.env")
 
 
 class AiuConfig:
@@ -601,14 +602,10 @@ def first_env(names: list[str]) -> str:
 
 
 def load_env_files() -> None:
-    here = Path(__file__).resolve().parent
     candidates = []
     if os.environ.get("AIU_ENV_FILE"):
         candidates.append(Path(os.environ["AIU_ENV_FILE"]))
-    candidates += [
-        here.parent / ".env",  # preferred: skill root, portable with this skill directory
-        here / ".env",         # optional script-local override
-    ]
+    candidates.append(AI_KEYS_ENV)
     for candidate in candidates:
         load_env(candidate)
 
