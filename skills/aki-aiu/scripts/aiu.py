@@ -34,7 +34,7 @@ from urllib.error import HTTPError, URLError
 
 # new-api 的额度单位：500000 quota = 1 USD
 QUOTA_PER_USD = 500_000
-PROFILE_ALIASES = {"cyg": "cygces"}
+PROFILE_ALIASES = {"cyg": "cygces", "sub2api": "cygces", "token-wave": "cygces"}
 DEFAULT_BASES = {
     "dshub": "https://api.dshub.top",
     "cygces": "https://codex-manager.cygces.com",
@@ -43,7 +43,25 @@ DEFAULT_API_STYLES = {
     "dshub": "new-api",
     "cygces": "sub2api",
 }
-AI_KEYS_ENV = Path("/Users/aki/.config/ai/keys.env")
+# Aki 的集中 API keys 文件。MacBook 上固定使用 /Users/aki/.config/ai/keys.env；
+# Hermes/Linux 环境没有 /Users/aki 时，回退到当前用户 ~/.config/ai/keys.env。
+# 可用 AIU_ENV_FILE 指向一次性文件，或 AIU_KEYS_ENV 覆盖默认集中配置文件路径。
+AI_KEYS_ENV = Path(os.environ.get("AIU_KEYS_ENV", "/Users/aki/.config/ai/keys.env"))
+FALLBACK_AI_KEYS_ENV = Path.home() / ".config" / "ai" / "keys.env"
+KNOWN_PROFILES = {
+    "dshub": {
+        "base": DEFAULT_BASES["dshub"],
+        "api_style": "new-api",
+        "auth": "用户名/密码登录；可选 DSHUB_API_KEY 查询 Bearer API Key 额度",
+        "quota_unit": "500000 quota = $1",
+    },
+    "cygces": {
+        "base": DEFAULT_BASES["cygces"],
+        "api_style": "sub2api",
+        "auth": "CYGCES_USERNAME / CYGCES_PASSWORD 登录 Sub2API 后台；CYGCES_HERMES_API_KEY 记录 Hermes 使用的 API Key",
+        "key_page": "https://codex-manager.cygces.com/keys",
+    },
+}
 
 
 class AiuConfig:
@@ -606,9 +624,15 @@ def load_env_files() -> None:
     if os.environ.get("AIU_ENV_FILE"):
         candidates.append(Path(os.environ["AIU_ENV_FILE"]))
     candidates.append(AI_KEYS_ENV)
+    if FALLBACK_AI_KEYS_ENV != AI_KEYS_ENV:
+        candidates.append(FALLBACK_AI_KEYS_ENV)
     for candidate in candidates:
         load_env(candidate)
 
+
+def known_profiles() -> dict:
+    """Return built-in profile metadata for docs/tests without exposing secrets."""
+    return KNOWN_PROFILES.copy()
 
 def resolve_config(args: argparse.Namespace) -> AiuConfig:
     load_env_files()

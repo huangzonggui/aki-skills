@@ -31,7 +31,7 @@ class AiuConfigTests(unittest.TestCase):
                 encoding="utf-8",
             )
             args = argparse.Namespace(profile="cygces", interval=None)
-            with patch.dict(os.environ, {}, clear=True), patch.object(aiu, "AI_KEYS_ENV", env_file):
+            with patch.dict(os.environ, {}, clear=True), patch.object(aiu, "AI_KEYS_ENV", env_file), patch.object(aiu, "FALLBACK_AI_KEYS_ENV", env_file):
                 config = aiu.resolve_config(args)
 
         self.assertEqual(config.profile, "cygces")
@@ -69,12 +69,42 @@ class AiuConfigTests(unittest.TestCase):
                 encoding="utf-8",
             )
             args = argparse.Namespace(profile="dshub", interval=None)
-            with patch.dict(os.environ, {}, clear=True), patch.object(aiu, "__file__", str(script_dir / "aiu.py")), patch.object(aiu, "AI_KEYS_ENV", global_keys):
+            with patch.dict(os.environ, {}, clear=True), patch.object(aiu, "__file__", str(script_dir / "aiu.py")), patch.object(aiu, "AI_KEYS_ENV", global_keys), patch.object(aiu, "FALLBACK_AI_KEYS_ENV", global_keys):
                 config = aiu.resolve_config(args)
 
         self.assertEqual(config.base, "https://global.example.com")
         self.assertEqual(config.username, "global-user")
         self.assertEqual(config.password, "global-pass")
+
+    def test_fallback_linux_keys_env_is_loaded_when_mac_path_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            missing_mac_keys = Path(tmp) / "missing" / "keys.env"
+            fallback_keys = Path(tmp) / "home" / ".config" / "ai" / "keys.env"
+            fallback_keys.parent.mkdir(parents=True)
+            fallback_keys.write_text(
+                "\n".join(
+                    [
+                        "DSHUB_BASE=https://linux.example.com",
+                        "DSHUB_USERNAME=linux-user",
+                        "DSHUB_PASSWORD=linux-pass",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(profile="dshub", interval=None)
+            with patch.dict(os.environ, {}, clear=True), patch.object(aiu, "AI_KEYS_ENV", missing_mac_keys), patch.object(aiu, "FALLBACK_AI_KEYS_ENV", fallback_keys):
+                config = aiu.resolve_config(args)
+
+        self.assertEqual(config.base, "https://linux.example.com")
+        self.assertEqual(config.username, "linux-user")
+        self.assertEqual(config.password, "linux-pass")
+
+    def test_known_profiles_document_built_in_relays(self):
+        profiles = aiu.known_profiles()
+        self.assertIn("dshub", profiles)
+        self.assertIn("cygces", profiles)
+        self.assertEqual(profiles["cygces"]["api_style"], "sub2api")
+        self.assertEqual(aiu.normalize_profile("token-wave"), "cygces")
 
 
 class AiuSummaryTests(unittest.TestCase):

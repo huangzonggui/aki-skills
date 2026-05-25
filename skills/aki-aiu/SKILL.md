@@ -7,6 +7,15 @@ description: Check AI relay station (new-api compatible, e.g. dshub.top / Token 
 
 查询任意 [new-api](https://github.com/Calcium-Ion/new-api) 兼容的 AI 中转站（如 dshub.top / Token Wave）的额度与套餐用量。返回当前通用余额、今日发放/已用/剩余、套餐池总量、套餐到期、当日清零时间等。可单次查询，也可常驻定时刷新。
 
+## 已知中转站信息
+
+| Profile | 平台/后台 | Base URL | API 风格 | 说明 |
+|---|---|---|---|---|
+| `dshub` | dshub.top | `https://api.dshub.top` | `new-api` | new-api 兼容；`500000 quota = $1`；支持账号套餐与 Bearer API Key 用量查询 |
+| `cygces` | Token Wave / Sub2API | `https://codex-manager.cygces.com` | `sub2api` | Hermes/Codex 相关 API Key 管理后台；别名：`cyg`、`sub2api`、`token-wave` |
+
+Aki 的凭据集中放在 AI keys 文件，不进仓库：MacBook 默认 `/Users/aki/.config/ai/keys.env`；Hermes/Linux 环境回退 `~/.config/ai/keys.env`；临时覆盖用 `AIU_ENV_FILE=/path/to/keys.env`；默认集中路径覆盖用 `AIU_KEYS_ENV=/path/to/keys.env`。
+
 ## When to use
 
 - 用户问"还剩多少额度 / 今天还能用多少 / 套餐什么时候到期"
@@ -16,21 +25,25 @@ description: Check AI relay station (new-api compatible, e.g. dshub.top / Token 
 ## Quick start
 
 ```bash
-# 1. 配置凭据（首次，把示例复制到全局 keys.env 后填真实值）
-mkdir -p /Users/aki/.config/ai
-cp ${SKILL_DIR}/.env.example /Users/aki/.config/ai/keys.env
-chmod 600 /Users/aki/.config/ai/keys.env
+# 1. 配置凭据（首次，把示例复制到集中 keys.env 后填真实值）
+# MacBook：/Users/aki/.config/ai/keys.env
+# Hermes/Linux：~/.config/ai/keys.env
+mkdir -p ~/.config/ai
+cp ${SKILL_DIR}/.env.example ~/.config/ai/keys.env
+chmod 600 ~/.config/ai/keys.env
 
-# /Users/aki/.config/ai/keys.env 示例字段：
+# keys.env 示例字段：
 DSHUB_BASE=https://api.dshub.top
+DSHUB_API_STYLE=new-api
 DSHUB_USERNAME=<你的账号>
-DSHUB_PASSWORD=<你的密码>
+DSHUB_PASSWORD=***
 
-# cygces / Hermes API Key 查询（Sub2API 后台）
+# cygces / Token Wave / Hermes API Key 查询（Sub2API 后台）
 CYGCES_BASE=https://codex-manager.cygces.com
+CYGCES_API_STYLE=sub2api
 CYGCES_USERNAME=<你的账号>
-CYGCES_PASSWORD=<你的密码>
-CYGCES_HERMES_API_KEY=<你的 API key>
+CYGCES_PASSWORD=***
+CYGCES_HERMES_API_KEY=***
 
 # 2. 单次查询（人类可读）
 python3 ${SKILL_DIR}/scripts/aiu.py --once
@@ -46,7 +59,7 @@ python3 ${SKILL_DIR}/scripts/aiu.py --interval 60     # 1 分钟
 python3 ${SKILL_DIR}/scripts/aiu.py --interval 300    # 5 分钟
 ```
 
-凭据默认从 `/Users/aki/.config/ai/keys.env` 读取；如需临时指定其它文件，可设置 `$AIU_ENV_FILE`。`.env.example` 只放占位字段，不放真实密钥。
+凭据默认从集中 keys 文件读取：MacBook `/Users/aki/.config/ai/keys.env`，Hermes/Linux `~/.config/ai/keys.env`。如需临时指定其它文件，可设置 `$AIU_ENV_FILE`；如需修改默认集中路径，可设置 `$AIU_KEYS_ENV`。`.env.example` 只放占位字段，不放真实密钥。
 
 ## Options
 

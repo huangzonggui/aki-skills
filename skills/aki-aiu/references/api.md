@@ -1,4 +1,13 @@
-# new-api 接口与字段说明（aki-aiu 用到）
+# AI 中转站接口与字段说明（aki-aiu 用到）
+
+## 已知平台
+
+| Profile | Base URL | 风格 | 备注 |
+|---|---|---|---|
+| `dshub` | `https://api.dshub.top` | `new-api` | 对 new-api 端点已验证；quota 按 `500000 = $1` 换算 |
+| `cygces` | `https://codex-manager.cygces.com` | `sub2api` | Token Wave / Sub2API 管理后台；Hermes/Codex key 在这里查；别名 `cyg`、`sub2api`、`token-wave` |
+
+# new-api 接口与字段说明
 
 适用于任何 [new-api](https://github.com/Calcium-Ion/new-api) 部署，已对 dshub.top 验证。
 
