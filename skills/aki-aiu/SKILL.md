@@ -11,8 +11,8 @@ description: Check AI relay station (new-api compatible, e.g. dshub.top / Token 
 
 | Profile | 平台/后台 | Base URL | API 风格 | 说明 |
 |---|---|---|---|---|
-| `dshub` | dshub.top | `https://api.dshub.top` | `new-api` | new-api 兼容；`500000 quota = $1`；支持账号套餐与 Bearer API Key 用量查询 |
-| `cygces` | Token Wave / Sub2API | `https://codex-manager.cygces.com` | `sub2api` | Hermes/Codex 相关 API Key 管理后台；别名：`cyg`、`sub2api`、`token-wave` |
+| `dshub` | TokenWave / dshub.top | `https://api.dshub.top` | `new-api` | `custom:tokenwave` 对应中转站；`500000 quota = $1`；支持账号套餐与 Bearer API Key 用量查询；别名：`tokenwave`、`token-wave` |
+| `cygces` | cygces / Sub2API | `https://codex-manager.cygces.com` | `sub2api` | `custom:cygces` 对应中转站；Hermes/Codex 相关 API Key 管理后台；别名：`cyg`、`codex`、`sub2api` |
 
 Aki 的凭据集中放在 AI keys 文件，不进仓库：MacBook 默认 `/Users/aki/.config/ai/keys.env`；Hermes/Linux 环境回退 `~/.config/ai/keys.env`；临时覆盖用 `AIU_ENV_FILE=/path/to/keys.env`；默认集中路径覆盖用 `AIU_KEYS_ENV=/path/to/keys.env`。
 
@@ -45,12 +45,14 @@ CYGCES_USERNAME=<你的账号>
 CYGCES_PASSWORD=***
 CYGCES_HERMES_API_KEY=***
 
-# 2. 单次查询（人类可读）
+# 2. 单次查询（人类可读；不传 profile 默认查两个中转站）
 python3 ${SKILL_DIR}/scripts/aiu.py --once
+python3 ${SKILL_DIR}/scripts/aiu.py --profile both --once
 python3 ${SKILL_DIR}/scripts/aiu.py --profile cygces --once
 
-# 3. 单次查询（JSON，喂给其它脚本）
+# 3. 单次查询（JSON，喂给其它脚本；默认返回 {"profiles": [...]}）
 python3 ${SKILL_DIR}/scripts/aiu.py --once --json
+python3 ${SKILL_DIR}/scripts/aiu.py both --once --json
 python3 ${SKILL_DIR}/scripts/aiu.py --profile cygces --once --json
 
 # 4. 定时刷新面板（默认 30s）
@@ -65,7 +67,7 @@ python3 ${SKILL_DIR}/scripts/aiu.py --interval 300    # 5 分钟
 
 | Parameter | Description | Default |
 |---|---|---|
-| `--profile <name>` | 配置 profile；支持 `dshub` / `cygces` / `cyg` | `dshub` |
+| `--profile <name>` | 配置 profile；支持 `dshub` / `cygces` / `all` / `both`，也可逗号或 `+` 分隔（如 `dshub,cyg`） | 默认查 `dshub` + `cygces` |
 | `--once` | 跑一次后退出 | false |
 | `--json` | 输出 JSON | false |
 | `--interval <sec>` | 刷新间隔（秒） | 30 |

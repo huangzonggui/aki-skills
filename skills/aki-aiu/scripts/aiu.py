@@ -34,7 +34,15 @@ from urllib.error import HTTPError, URLError
 
 # new-api 的额度单位：500000 quota = 1 USD
 QUOTA_PER_USD = 500_000
-PROFILE_ALIASES = {"cyg": "cygces", "sub2api": "cygces", "token-wave": "cygces"}
+DEFAULT_QUERY_PROFILES = ("dshub", "cygces")
+MULTI_PROFILE_ALIASES = {"all", "both"}
+PROFILE_ALIASES = {
+    "tokenwave": "dshub",
+    "token-wave": "dshub",
+    "cyg": "cygces",
+    "codex": "cygces",
+    "sub2api": "cygces",
+}
 DEFAULT_BASES = {
     "dshub": "https://api.dshub.top",
     "cygces": "https://codex-manager.cygces.com",
@@ -54,11 +62,13 @@ KNOWN_PROFILES = {
         "api_style": "new-api",
         "auth": "用户名/密码登录；可选 DSHUB_API_KEY 查询 Bearer API Key 额度",
         "quota_unit": "500000 quota = $1",
+        "runtime_provider": "custom:tokenwave / https://api.dshub.top/v1",
     },
     "cygces": {
         "base": DEFAULT_BASES["cygces"],
         "api_style": "sub2api",
         "auth": "CYGCES_USERNAME / CYGCES_PASSWORD 登录 Sub2API 后台；CYGCES_HERMES_API_KEY 记录 Hermes 使用的 API Key",
+        "runtime_provider": "custom:cygces / https://codex.cygces.com/v1",
         "key_page": "https://codex-manager.cygces.com/keys",
     },
 }
@@ -603,8 +613,28 @@ def render_text(summary: dict, color: bool = True) -> str:
 
 # ---------- main loop ----------
 def normalize_profile(profile: str) -> str:
-    profile = (profile or "dshub").strip().lower()
+    profile = (profile or "").strip().lower()
+    if not profile:
+        return ""
     return PROFILE_ALIASES.get(profile, profile)
+
+
+def resolve_profiles(profile: str | None) -> list[str]:
+    """Resolve CLI/env profile selection into one or more concrete profiles."""
+    raw = (profile or "").strip().lower()
+    if not raw or raw in MULTI_PROFILE_ALIASES:
+        return list(DEFAULT_QUERY_PROFILES)
+    parts = [part.strip() for part in raw.replace("+", ",").split(",") if part.strip()]
+    profiles = []
+    for part in parts:
+        if part in MULTI_PROFILE_ALIASES:
+            candidates = DEFAULT_QUERY_PROFILES
+        else:
+            candidates = (normalize_profile(part),)
+        for candidate in candidates:
+            if candidate and candidate not in profiles:
+                profiles.append(candidate)
+    return profiles or list(DEFAULT_QUERY_PROFILES)
 
 
 def env_prefix(profile: str) -> str:
@@ -634,18 +664,19 @@ def known_profiles() -> dict:
     """Return built-in profile metadata for docs/tests without exposing secrets."""
     return KNOWN_PROFILES.copy()
 
-def resolve_config(args: argparse.Namespace) -> AiuConfig:
+def resolve_config(args: argparse.Namespace, profile: str | None = None) -> AiuConfig:
     load_env_files()
-    profile = normalize_profile(args.profile or os.environ.get("AIU_PROFILE", "dshub"))
-    prefix = env_prefix(profile)
-    base = first_env([f"{prefix}_BASE", "AIU_BASE"]) or DEFAULT_BASES.get(profile, "")
+    selected = profile if profile is not None else args.profile or os.environ.get("AIU_PROFILE", "")
+    concrete_profile = normalize_profile(selected) or DEFAULT_QUERY_PROFILES[0]
+    prefix = env_prefix(concrete_profile)
+    base = first_env([f"{prefix}_BASE", "AIU_BASE"]) or DEFAULT_BASES.get(concrete_profile, "")
     username = first_env([f"{prefix}_USERNAME", "AIU_USERNAME"])
     password = first_env([f"{prefix}_PASSWORD", "AIU_PASSWORD"])
     api_key = first_env([f"{prefix}_API_KEY", f"{prefix}_HERMES_API_KEY", "AIU_API_KEY"])
     interval_raw = first_env([f"{prefix}_INTERVAL", "AIU_INTERVAL", "DSHUB_INTERVAL"])
     interval = args.interval if args.interval is not None else int(interval_raw or 30)
-    api_style = first_env([f"{prefix}_API_STYLE", "AIU_API_STYLE"]) or DEFAULT_API_STYLES.get(profile, "new-api")
-    return AiuConfig(profile, base, username, password, api_key, interval, api_style)
+    api_style = first_env([f"{prefix}_API_STYLE", "AIU_API_STYLE"]) or DEFAULT_API_STYLES.get(concrete_profile, "new-api")
+    return AiuConfig(concrete_profile, base, username, password, api_key, interval, api_style)
 
 
 def run_once(client: DshubClient, profile: str = "dshub") -> dict:
@@ -699,9 +730,43 @@ def run_once_sub2api(client: Sub2apiClient, profile: str = "cygces") -> dict:
     )
 
 
+def create_runner(config: AiuConfig):
+    if config.api_style == "sub2api":
+        client = Sub2apiClient(config.base, config.username, config.password)
+        return lambda: run_once_sub2api(client, config.profile), client
+    client = DshubClient(config.base, config.username, config.password, config.api_key)
+    return lambda: run_once(client, config.profile), client
+
+
+def validate_config(config: AiuConfig) -> list[str]:
+    errors = []
+    prefix = env_prefix(config.profile)
+    if not config.base:
+        errors.append(f"请设置 {prefix}_BASE")
+    if config.api_style == "sub2api" and not (config.username and config.password):
+        missing = []
+        if not config.username:
+            missing.append(f"{prefix}_USERNAME")
+        if not config.password:
+            missing.append(f"{prefix}_PASSWORD")
+        errors.append(f"请设置 {' / '.join(missing)}")
+    if config.api_style != "sub2api" and not ((config.username and config.password) or config.api_key):
+        errors.append(f"请设置 {prefix}_USERNAME / {prefix}_PASSWORD，或设置 {prefix}_API_KEY")
+    return errors
+
+
+def build_error_summary(profile: str, base: str, error: str) -> dict:
+    return {
+        "fetched_at": int(time.time()),
+        "source": {"profile": profile, "base": base},
+        "error": error,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="AI 中转站余额/套餐/API Key 额度监控")
-    parser.add_argument("--profile", default=None, help="配置 profile，例如 dshub / cygces")
+    parser.add_argument("profile_arg", nargs="?", default=None, help="配置 profile；支持 dshub / cygces / all / both，也可逗号分隔")
+    parser.add_argument("--profile", default=None, help="配置 profile，例如 dshub / cygces / all / both")
     parser.add_argument("--once", action="store_true", help="只执行一次后退出")
     parser.add_argument("--json", action="store_true", help="输出 JSON 而非可读文本")
     parser.add_argument("--interval", type=int, default=None, help="刷新间隔（秒）")
@@ -709,59 +774,71 @@ def main() -> int:
     parser.add_argument("--no-clear", action="store_true", help="不清屏，每次追加输出")
     args = parser.parse_args()
 
-    config = resolve_config(args)
-    if not config.base:
-        print(f"错误：请设置 {env_prefix(config.profile)}_BASE", file=sys.stderr)
-        return 2
-    if config.api_style == "sub2api" and not (config.username and config.password):
-        prefix = env_prefix(config.profile)
-        missing = []
-        if not config.username:
-            missing.append(f"{prefix}_USERNAME")
-        if not config.password:
-            missing.append(f"{prefix}_PASSWORD")
-        print(f"错误：请设置 {' / '.join(missing)}", file=sys.stderr)
-        return 2
-    if config.api_style != "sub2api" and not ((config.username and config.password) or config.api_key):
-        prefix = env_prefix(config.profile)
-        print(
-            f"错误：请设置 {prefix}_USERNAME / {prefix}_PASSWORD，或设置 {prefix}_API_KEY",
-            file=sys.stderr,
-        )
+    # CLI default intentionally ignores AIU_PROFILE so a plain `aiu --once`
+    # always checks Aki's two active relays. Pass a profile/alias explicitly
+    # when a single relay is needed.
+    selected_profile = args.profile or args.profile_arg
+    profiles = resolve_profiles(selected_profile)
+    configs = [resolve_config(args, profile) for profile in profiles]
+
+    had_config_error = False
+    runners = []
+    clients = []
+    for config in configs:
+        errors = validate_config(config)
+        if errors:
+            had_config_error = True
+            for error in errors:
+                print(f"错误[{config.profile}]：{error}", file=sys.stderr)
+            continue
+        runner, client = create_runner(config)
+        runners.append((config, runner))
+        clients.append(client)
+
+    if not runners:
         return 2
 
-    if config.api_style == "sub2api":
-        client = Sub2apiClient(config.base, config.username, config.password)
-        runner = lambda: run_once_sub2api(client, config.profile)
-    else:
-        client = DshubClient(config.base, config.username, config.password, config.api_key)
-        runner = lambda: run_once(client, config.profile)
-
-    def emit(summary: dict) -> None:
+    def emit_all() -> int:
+        exit_code = 0
+        summaries = []
+        for config, runner in runners:
+            try:
+                summaries.append(runner())
+            except (HTTPError, URLError, RuntimeError) as e:
+                exit_code = 1
+                summaries.append(build_error_summary(config.profile, config.base, str(e)))
         if args.json:
-            print(json.dumps(summary, ensure_ascii=False, indent=2))
+            payload = summaries[0] if len(summaries) == 1 else {"fetched_at": int(time.time()), "profiles": summaries}
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
             if not args.once and not args.no_clear:
                 sys.stdout.write(ANSI["clear"])
-            print(render_text(summary, color=not args.no_color))
+            for i, summary in enumerate(summaries):
+                if i:
+                    print("\n" + "-" * 72 + "\n")
+                if summary.get("error"):
+                    src = summary.get("source", {})
+                    print(f"[{src.get('profile', 'unknown')}] 刷新失败：{summary['error']}")
+                else:
+                    print(render_text(summary, color=not args.no_color))
             sys.stdout.flush()
+        return exit_code
 
     if args.once:
-        emit(runner())
-        return 0
+        return max(emit_all(), 2 if had_config_error else 0)
 
-    print(f"开始监控 {config.base} ，每 {config.interval}s 刷新一次（Ctrl+C 退出）", file=sys.stderr)
+    profile_names = ", ".join(config.profile for config, _ in runners)
+    interval = min(config.interval for config, _ in runners)
+    print(f"开始监控 {profile_names} ，每 {interval}s 刷新一次（Ctrl+C 退出）", file=sys.stderr)
     try:
         while True:
-            try:
-                emit(runner())
-            except (HTTPError, URLError, RuntimeError) as e:
-                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                print(f"[{ts}] 刷新失败：{e}", file=sys.stderr)
-                client.user_id = None  # 强制下次重新登录
-            time.sleep(config.interval)
+            emit_all()
+            time.sleep(interval)
     except KeyboardInterrupt:
         print("\n已停止。", file=sys.stderr)
+    for client in clients:
+        if hasattr(client, "user_id"):
+            client.user_id = None
     return 0
 
 

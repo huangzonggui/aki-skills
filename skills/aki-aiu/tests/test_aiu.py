@@ -104,7 +104,52 @@ class AiuConfigTests(unittest.TestCase):
         self.assertIn("dshub", profiles)
         self.assertIn("cygces", profiles)
         self.assertEqual(profiles["cygces"]["api_style"], "sub2api")
-        self.assertEqual(aiu.normalize_profile("token-wave"), "cygces")
+        self.assertEqual(aiu.normalize_profile("token-wave"), "dshub")
+        self.assertEqual(aiu.normalize_profile("cyg"), "cygces")
+        self.assertEqual(aiu.normalize_profile("sub2api"), "cygces")
+
+    def test_resolve_profiles_defaults_to_both_relays(self):
+        self.assertEqual(aiu.resolve_profiles(None), ["dshub", "cygces"])
+        self.assertEqual(aiu.resolve_profiles(""), ["dshub", "cygces"])
+        self.assertEqual(aiu.resolve_profiles("all"), ["dshub", "cygces"])
+        self.assertEqual(aiu.resolve_profiles("both"), ["dshub", "cygces"])
+
+    def test_resolve_profiles_accepts_single_alias_and_multi_profile(self):
+        self.assertEqual(aiu.resolve_profiles("cyg"), ["cygces"])
+        self.assertEqual(aiu.resolve_profiles("token-wave"), ["dshub"])
+        self.assertEqual(aiu.resolve_profiles("dshub,cyg"), ["dshub", "cygces"])
+        self.assertEqual(aiu.resolve_profiles("cyg+dshub"), ["cygces", "dshub"])
+
+    def test_default_cli_profile_list_ignores_aiu_profile_env(self):
+        with patch.dict(os.environ, {"AIU_PROFILE": "cygces"}, clear=True):
+            self.assertEqual(aiu.resolve_profiles(None), ["dshub", "cygces"])
+
+    def test_resolve_config_can_target_each_default_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / "keys.env"
+            env_file.write_text(
+                "\n".join(
+                    [
+                        "DSHUB_BASE=https://api.dshub.top",
+                        "DSHUB_API_STYLE=new-api",
+                        "DSHUB_API_KEY=sk-dshub-test",
+                        "CYGCES_BASE=https://codex-manager.cygces.com",
+                        "CYGCES_API_STYLE=sub2api",
+                        "CYGCES_USERNAME=aki@example.com",
+                        "CYGCES_PASSWORD=fill-me",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(profile=None, interval=None)
+            with patch.dict(os.environ, {}, clear=True), patch.object(aiu, "AI_KEYS_ENV", env_file), patch.object(aiu, "FALLBACK_AI_KEYS_ENV", env_file):
+                configs = [aiu.resolve_config(args, profile) for profile in aiu.resolve_profiles("both")]
+
+        self.assertEqual([config.profile for config in configs], ["dshub", "cygces"])
+        self.assertEqual(configs[0].api_style, "new-api")
+        self.assertEqual(configs[0].api_key, "sk-dshub-test")
+        self.assertEqual(configs[1].api_style, "sub2api")
+        self.assertEqual(configs[1].username, "aki@example.com")
 
 
 class AiuSummaryTests(unittest.TestCase):
