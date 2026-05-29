@@ -252,6 +252,59 @@ function markdownImageToHtml(altText: string, src: string): string {
   return `<img src="${escapeHtml(src.trim())}" alt="${escapeHtml(altText.trim())}">`;
 }
 
+function mimeTypeForImage(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.svg') return 'image/svg+xml';
+  return 'application/octet-stream';
+}
+
+function resolveLocalImagePath(src: string, baseDir: string): string | undefined {
+  const trimmed = src.trim();
+  if (!trimmed || /^(?:data:|https?:|blob:)/i.test(trimmed)) {
+    return undefined;
+  }
+
+  const withoutHash = trimmed.split('#')[0] ?? '';
+  const withoutQuery = withoutHash.split('?')[0] ?? '';
+  if (!withoutQuery) {
+    return undefined;
+  }
+
+  try {
+    if (/^file:\/\//i.test(withoutQuery)) {
+      return fileURLToPath(withoutQuery);
+    }
+  } catch {
+    return undefined;
+  }
+
+  try {
+    return path.resolve(baseDir, decodeURIComponent(withoutQuery));
+  } catch {
+    return path.resolve(baseDir, withoutQuery);
+  }
+}
+
+export function inlineLocalImagesInHtml(html: string, baseDir: string): string {
+  return html.replace(
+    /(<img\b[^>]*?\bsrc=)(["'])([^"']+)\2([^>]*>)/gi,
+    (fullMatch, prefix: string, quote: string, src: string, suffix: string) => {
+      const imagePath = resolveLocalImagePath(src, baseDir);
+      if (!imagePath || !fs.existsSync(imagePath) || !fs.statSync(imagePath).isFile()) {
+        return fullMatch;
+      }
+
+      const mimeType = mimeTypeForImage(imagePath);
+      const base64 = fs.readFileSync(imagePath).toString('base64');
+      return `${prefix}${quote}data:${mimeType};base64,${base64}${quote}${suffix}`;
+    },
+  );
+}
+
 export function preConvertMarkdownToHtml(articleText: string): string {
   const codeBlocks: string[] = [];
   let codeBlockIndex = 0;
@@ -661,6 +714,7 @@ async function generateHtml(
     await generateStyledHtmlWithLLM(parsed.content, apiConfig, style),
     style,
   );
+  const exportReadyHtml = inlineLocalImagesInHtml(styledHtml, path.dirname(inputPath));
 
   const displayTitle = (options.title ?? parsed.title ?? '').trim();
   const hasDisplayTitle = Boolean(displayTitle);
@@ -678,7 +732,7 @@ async function generateHtml(
   const width = options.width ?? 600;
   const ratio = options.ratio ?? '3:4';
 
-  html = html.replaceAll('{{CONTENT}}', styledHtml);
+  html = html.replaceAll('{{CONTENT}}', exportReadyHtml);
   html = html.replaceAll('{{RATIO}}', ratio);
   html = html.replaceAll('{{TARGET_WIDTH}}', String(width));
 

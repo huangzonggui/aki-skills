@@ -129,19 +129,37 @@ COMFLY_CHAT_MODEL=gpt-4o-mini
 
 ## Slicing Algorithm (BLOCK-LEVEL)
 
-The slicing uses **block-level element splitting** to prevent cutting text:
+The `part-guide` slicing/export path uses **export-time measurement**, not the visible preview DOM height. This is important because `html2canvas` does not behave exactly like browser layout for every CSS feature.
 
 ```
 Target: 600 × 800px (3:4) or 600 × 1000px (3:5)
 
-Block-level splitting:
-1. Measure each block element (h1, h2, h3, p, blockquote, etc.)
-2. Accumulate blocks until target height
-3. If next block exceeds, start new slice
-4. Never cut within a block
+Export-safe splitting:
+1. Build hidden fixed-size export pages (`600 × targetHeight`).
+2. Split by top-level blocks, but split `ul/ol` by `li` so one long list cannot overflow a page.
+3. Keep `h2` with its first following block when possible.
+4. Measure `scrollHeight <= clientHeight` inside the real export page before accepting a slice.
+5. Render the fixed export page, not a temporary auto-height wrapper.
 ```
 
-**Key**: Uses hidden staging div to measure element heights before slicing.
+**Key**: the page that is measured must be the same page that is rendered.
+
+## PNG Export Guardrails
+
+This skill previously failed in two ways that are easy to miss if you only inspect the HTML:
+
+- Local images referenced from a `file://` HTML page can taint or break `html2canvas` export. The generator now inlines local image files as `data:` URLs before writing HTML.
+- Cross-line `<mark>` backgrounds can drift in `html2canvas`, showing a yellow bar above the text. The template keeps normal `<mark>` styling for preview, but for export it hides the mark background, measures each rendered mark line with `getClientRects()`, and draws `.export-highlight-bg` yellow blocks behind the text.
+
+Do not “fix” export artifacts by deleting highlights. Preserve the yellow highlight and change the export rendering path.
+
+Before reporting success for imagepost PNG export:
+
+1. Export actual PNG files from the generated HTML, not just inspect the browser preview.
+2. Verify every PNG is the requested size.
+3. Check actual pixels are nonblank; dimensions alone are not enough.
+4. Visually inspect the known fragile areas: first page highlights, last page highlights, and any page containing local images.
+5. If a model/API retry fails while regenerating HTML, validate the template with a smoke HTML, but say the model call failed.
 
 ## Resources
 
@@ -156,3 +174,5 @@ Block-level splitting:
 - **Text looks compressed**: Should be fixed - width is 600px by default
 - **Background not white**: Should be fixed - pure white background is default
 - **Text gets cut mid-line**: Should be fixed - now uses block-level slicing
+- **Exported PNG is blank**: Check for non-inlined local images and use `allowTaint: false`; the template has a multi-region blank-canvas detector.
+- **Yellow highlight drifts above text**: Do not remove `<mark>`; use export-time highlight overlays from `decorateMarkBackgroundsForExport()`.

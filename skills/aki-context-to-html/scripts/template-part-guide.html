@@ -500,6 +500,66 @@
             padding-top: 24px;
         }
 
+        .export-render-root {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: {{TARGET_WIDTH}}px;
+            z-index: 9999;
+            pointer-events: none;
+        }
+
+        .export-slice {
+            position: relative;
+            width: {{TARGET_WIDTH}}px;
+            height: {{TARGET_HEIGHT}}px;
+            overflow: hidden;
+            background: var(--guide-card);
+        }
+
+        .export-slice .content-area {
+            position: relative;
+            width: {{TARGET_WIDTH}}px;
+            height: {{TARGET_HEIGHT}}px;
+            padding: var(--content-padding-y) var(--content-padding-x) 96px;
+            overflow: hidden;
+            background: var(--guide-card);
+        }
+
+        .export-slice .content-area > :not(.export-highlight-bg) {
+            position: relative;
+            z-index: 1;
+        }
+
+        .export-slice .page-number {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 28px;
+            padding-top: 0;
+        }
+
+        .export-slice mark {
+            background: transparent !important;
+            background-image: none !important;
+            padding: 0 !important;
+            border-radius: 0 !important;
+            color: var(--guide-strong) !important;
+            font-weight: 800 !important;
+            line-height: inherit !important;
+            box-shadow: none !important;
+            box-decoration-break: slice !important;
+            -webkit-box-decoration-break: slice !important;
+        }
+
+        .export-highlight-bg {
+            position: absolute;
+            background: var(--guide-highlight);
+            border-radius: 4px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
         #staging {
             position: absolute;
             top: -9999px;
@@ -593,8 +653,7 @@
 
         function updateStats() {
             const targetHeight = getTargetHeight(currentRatio);
-            stagingContent.innerHTML = contentArea.innerHTML;
-            const chunks = calculateChunks(stagingContent, targetHeight);
+            const chunks = calculateChunks(targetHeight);
             sliceCountEl.textContent = `${chunks.length} 张`;
             outputSizeEl.textContent = `${CONFIG.targetWidth} × ${targetHeight}`;
         }
@@ -610,25 +669,133 @@
             }
         }
 
-        function calculateChunks(container, targetHeight) {
-            const elements = Array.from(container.children);
+        function splitListElement(listEl) {
+            const tagName = listEl.tagName.toLowerCase();
+            return Array.from(listEl.children).map(item => {
+                const list = document.createElement(tagName);
+                list.appendChild(item.cloneNode(true));
+                return list;
+            });
+        }
+
+        function expandExportBlock(el) {
+            if (el.matches('ul, ol')) {
+                return splitListElement(el);
+            }
+            return [el];
+        }
+
+        function getExportUnits() {
+            const rawBlocks = Array.from(contentArea.children)
+                .filter(el => el.tagName !== 'BR');
+
+            const units = [];
+            for (let i = 0; i < rawBlocks.length; i++) {
+                const current = rawBlocks[i];
+                if (current.matches('h2.section-title') && rawBlocks[i + 1]) {
+                    const nextBlocks = expandExportBlock(rawBlocks[i + 1]);
+                    units.push([current].concat(nextBlocks.slice(0, 1)));
+                    for (const nextBlock of nextBlocks.slice(1)) {
+                        units.push([nextBlock]);
+                    }
+                    i += 1;
+                } else {
+                    for (const block of expandExportBlock(current)) {
+                        units.push([block]);
+                    }
+                }
+            }
+
+            return units;
+        }
+
+        function createExportSlice(units, targetHeight, pageIndex = 1, totalPages = 1) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'export-slice';
+            wrapper.style.height = `${targetHeight}px`;
+
+            const content = document.createElement('div');
+            content.className = 'content-area';
+            content.style.height = `${targetHeight}px`;
+
+            for (const unit of units) {
+                for (const el of unit) {
+                    content.appendChild(el.cloneNode(true));
+                }
+            }
+
+            const pageNum = document.createElement('div');
+            pageNum.className = 'page-number';
+            pageNum.textContent = `${pageIndex}/${totalPages}`;
+
+            wrapper.appendChild(content);
+            wrapper.appendChild(pageNum);
+
+            return wrapper;
+        }
+
+        function waitForImages(root) {
+            const images = Array.from(root.querySelectorAll('img'));
+            return Promise.all(images.map(img => {
+                if (img.complete && img.naturalWidth > 0) {
+                    return Promise.resolve();
+                }
+                return new Promise(resolve => {
+                    img.onload = resolve;
+                    img.onerror = resolve;
+                });
+            }));
+        }
+
+        function decorateMarkBackgroundsForExport(wrapper) {
+            const content = wrapper.querySelector('.content-area');
+            if (!content) return;
+
+            content.querySelectorAll('.export-highlight-bg').forEach(bg => bg.remove());
+
+            const contentRect = content.getBoundingClientRect();
+            const marks = Array.from(content.querySelectorAll('mark'));
+
+            for (const mark of marks) {
+                const rects = Array.from(mark.getClientRects())
+                    .filter(rect => rect.width > 1 && rect.height > 1);
+
+                for (const rect of rects) {
+                    const bg = document.createElement('span');
+                    bg.className = 'export-highlight-bg';
+                    bg.style.left = `${rect.left - contentRect.left - 3}px`;
+                    bg.style.top = `${rect.top - contentRect.top + rect.height * 0.17}px`;
+                    bg.style.width = `${rect.width + 6}px`;
+                    bg.style.height = `${rect.height * 0.72}px`;
+                    content.insertBefore(bg, content.firstChild);
+                }
+            }
+        }
+
+        function calculateChunks(targetHeight) {
+            const units = getExportUnits();
             const chunks = [];
             let currentChunk = [];
-            let currentHeight = 0;
-            const padding = 56 + 68;
+            const measuringRoot = document.createElement('div');
+            measuringRoot.className = 'export-render-root';
+            measuringRoot.style.visibility = 'hidden';
+            document.body.appendChild(measuringRoot);
 
-            for (const el of elements) {
-                const elHeight = el.offsetHeight;
+            const fits = (candidate) => {
+                measuringRoot.innerHTML = '';
+                const testSlice = createExportSlice(candidate, targetHeight);
+                measuringRoot.appendChild(testSlice);
+                const content = testSlice.querySelector('.content-area');
+                return content.scrollHeight <= content.clientHeight;
+            };
 
-                if (currentHeight + elHeight > targetHeight - padding) {
-                    if (currentChunk.length > 0) {
-                        chunks.push(currentChunk);
-                    }
-                    currentChunk = [el];
-                    currentHeight = elHeight;
+            for (const unit of units) {
+                const candidate = currentChunk.concat([unit]);
+                if (currentChunk.length > 0 && !fits(candidate)) {
+                    chunks.push(currentChunk);
+                    currentChunk = [unit];
                 } else {
-                    currentChunk.push(el);
-                    currentHeight += elHeight;
+                    currentChunk = candidate;
                 }
             }
 
@@ -636,7 +803,44 @@
                 chunks.push(currentChunk);
             }
 
+            document.body.removeChild(measuringRoot);
             return chunks;
+        }
+
+        function canvasLooksBlank(canvas) {
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return true;
+
+            let min = 255;
+            let max = 0;
+            const colors = new Set();
+            const sampleSize = 32;
+            const points = [
+                [0.08, 0.08], [0.50, 0.08], [0.92, 0.08],
+                [0.08, 0.35], [0.50, 0.35], [0.92, 0.35],
+                [0.08, 0.62], [0.50, 0.62], [0.92, 0.62],
+                [0.08, 0.88], [0.50, 0.88], [0.92, 0.88],
+            ];
+
+            for (const [px, py] of points) {
+                const x = Math.max(0, Math.min(canvas.width - sampleSize, Math.round(canvas.width * px - sampleSize / 2)));
+                const y = Math.max(0, Math.min(canvas.height - sampleSize, Math.round(canvas.height * py - sampleSize / 2)));
+                const data = ctx.getImageData(x, y, sampleSize, sampleSize).data;
+
+                for (let i = 0; i < data.length; i += 4) {
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    const avg = Math.round((r + g + b) / 3);
+                    min = Math.min(min, avg);
+                    max = Math.max(max, avg);
+                    if (colors.size < 48) {
+                        colors.add(`${r >> 4},${g >> 4},${b >> 4}`);
+                    }
+                }
+            }
+
+            return max - min < 6 || colors.size < 4;
         }
 
         async function exportSlices() {
@@ -648,53 +852,46 @@
             try {
                 await document.fonts.ready;
 
-                const chunks = calculateChunks(contentArea, targetHeight);
+                const chunks = calculateChunks(targetHeight);
                 const totalSlices = chunks.length;
 
                 showToast(`正在生成: 0/${totalSlices}`);
 
                 const renderContainer = document.createElement('div');
-                renderContainer.style.cssText = `
-                    position: absolute;
-                    top: -9999px;
-                    left: -9999px;
-                    width: ${CONFIG.targetWidth}px;
-                `;
+                renderContainer.className = 'export-render-root';
                 document.body.appendChild(renderContainer);
 
                 for (let i = 0; i < chunks.length; i++) {
                     const chunk = chunks[i];
-                    const wrapper = document.createElement('div');
-                    wrapper.style.cssText = `
-                        width: ${CONFIG.targetWidth}px;
-                        min-height: ${targetHeight}px;
-                        background: var(--guide-card);
-                        padding: 56px 44px 68px;
-                        box-sizing: border-box;
-                    `;
+                    const wrapper = createExportSlice(chunk, targetHeight, i + 1, totalSlices);
 
-                    for (const el of chunk) {
-                        wrapper.appendChild(el.cloneNode(true));
-                    }
-
-                    const pageNum = document.createElement('div');
-                    pageNum.className = 'page-number';
-                    pageNum.textContent = `${i + 1}/${totalSlices}`;
-                    wrapper.appendChild(pageNum);
-
+                    renderContainer.innerHTML = '';
                     renderContainer.appendChild(wrapper);
+                    await waitForImages(wrapper);
+                    await new Promise(resolve => requestAnimationFrame(resolve));
+                    decorateMarkBackgroundsForExport(wrapper);
+                    await new Promise(resolve => requestAnimationFrame(resolve));
 
                     const canvas = await html2canvas(wrapper, {
                         width: CONFIG.targetWidth,
+                        height: targetHeight,
                         scale: CONFIG.scale,
                         useCORS: true,
-                        backgroundColor: '#f8f8f5',
+                        backgroundColor: '#fffaf8',
                         logging: false,
-                        allowTaint: true,
+                        allowTaint: false,
                         foreignObjectRendering: false,
+                        windowWidth: CONFIG.targetWidth,
+                        windowHeight: targetHeight,
+                        scrollX: 0,
+                        scrollY: 0,
                         imageTimeout: 15000,
                         removeContainer: false
                     });
+
+                    if (canvasLooksBlank(canvas)) {
+                        throw new Error(`第 ${i + 1} 张导出为空白，请检查图片资源或导出样式`);
+                    }
 
                     canvas.toBlob((blob) => {
                         if (blob) {
@@ -706,8 +903,6 @@
                             URL.revokeObjectURL(url);
                         }
                     }, 'image/png');
-
-                    renderContainer.removeChild(wrapper);
                     showToast(`正在生成: ${i + 1}/${totalSlices}`);
                     await new Promise(resolve => setTimeout(resolve, 200));
                 }
